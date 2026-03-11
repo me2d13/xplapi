@@ -1,0 +1,30 @@
+# Build output
+build/
+
+# MSBuild intermediate
+*.user
+*.suo
+*.aps
+
+# VS browse / intellisense db
+*.sdf
+*.opensdf
+*.db
+ipch/
+.vs/
+
+# Compiled output at root (old layout)
+*.xpl
+*.dll
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+#X-plane SDK
+SDK/
