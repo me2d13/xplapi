@@ -140,6 +140,7 @@
     <ClCompile Include="src\TcpListener.cpp" />
     <ClCompile Include="src\DataRefRegistry.cpp" />
     <ClCompile Include="src\WebServer.cpp" />
+    <ClCompile Include="src\StaticFileServer.cpp" />
   </ItemGroup>
 
   <ItemGroup>
@@ -148,6 +149,7 @@
     <ClInclude Include="include\TcpListener.h" />
     <ClInclude Include="include\DataRefRegistry.h" />
     <ClInclude Include="include\WebServer.h" />
+    <ClInclude Include="include\StaticFileServer.h" />
     <ClInclude Include="include\json.hpp" />
   </ItemGroup>
 

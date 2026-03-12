@@ -10,7 +10,8 @@ Useful for driving external displays, tablet panels, scripts, and home-cockpit t
 - **Zero configuration required** — starts on port `8012` out of the box
 - **Lazy dataref resolution** — just ask for a name; the plugin finds the handle automatically
 - **On-demand reads** — values are always fresh (updated every 100 ms by the flight loop)
-- **Status page** at `/` — live view of every tracked dataref in the browser
+- **Status page** at `/state` — live view of every tracked dataref in the browser
+- **Static web server** — optional `www/` directory for custom pages (e.g. `api-test.html` to try APIs from the browser)
 - **CORS enabled** — call the API directly from any browser tab or web app
 - **Single config file** — optional `config.yaml` next to the `.xpl` file
 
@@ -86,11 +87,29 @@ Adjust `DEPLOY_DIR` in `build.bat` if your X-Plane lives elsewhere.
 Base URL: `http://localhost:8012`  
 All API responses are `application/json`.
 
+**Tip:** Open `http://localhost:8012/api-test.html` from the status page to try each endpoint from the browser — paste request bodies, click Execute, and see the status code and response.
+
 ---
 
 ### `GET /`
 
-Status page (HTML). Shows all currently tracked datarefs, their resolved types, and whether they were found in X-Plane. Auto-refreshes every 5 seconds.
+- If `www/index.html` exists: serves that file.
+- Otherwise: redirects to `/state`.
+
+### `GET /state`
+
+Status page (HTML). Shows all currently tracked datarefs, their resolved types, and whether they were found in X-Plane. Lists detected HTML pages from the `www/` directory. Auto-refreshes every 5 seconds.
+
+---
+
+### Static web files (`www/`)
+
+Place HTML files in the `www/` directory next to the plugin (e.g. `plugins/xplapi/www/`). They are served at `/filename.html` and linked from the status page.
+
+| File | Description |
+|------|--------------|
+| `index.html` | Served at `/` when present; otherwise `/` redirects to `/state` |
+| `api-test.html` | Interactive API test page — paste request bodies, execute each endpoint, view status code and response |
 
 ---
 
@@ -333,7 +352,12 @@ xplapi/
 │   ├── Config.cpp          config.yaml reader
 │   ├── DataRefRegistry.cpp Lazy dataref lookup + value cache
 │   ├── TcpListener.cpp     Winsock select()-based TCP server
-│   └── WebServer.cpp       HTTP routing + JSON responses
+│   ├── WebServer.cpp       HTTP routing + JSON responses
+│   └── StaticFileServer.cpp Serves files from www/
+├── www/                    Static web files (optional)
+│   ├── index.html          Served at / if present
+│   ├── api-test.html       Interactive API test page
+│   └── *.html              Other pages (linked from status page)
 ├── include/
 │   ├── plugin.h            Plugin identity + platform macros
 │   ├── Config.h

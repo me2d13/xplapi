@@ -48,6 +48,7 @@ PLUGIN_API int XPluginStart(char* outName, char* outSig, char* outDesc)
     // Wire up the web server
     g_webServer.setPort(g_config.port());
     g_webServer.setRegistry(&g_registry);
+    g_webServer.setPluginDir(pluginDir);
 
     if (g_webServer.init() != 0) {
         XPLMDebugString("xplapi: FAILED to bind web server\n");

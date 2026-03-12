@@ -174,6 +174,18 @@ void WebServer::sendHttp(int sock, int status, const std::string& contentType,
     sendToClient(sock, out.c_str(), (int)out.size());
 }
 
+void WebServer::sendRedirect(int sock, const std::string& location)
+{
+    std::ostringstream oss;
+    oss << "HTTP/1.1 302 Found\r\n"
+        << "Location: " << location << "\r\n"
+        << "Content-Length: 0\r\n"
+        << "Connection: close\r\n"
+        << "\r\n";
+    std::string out = oss.str();
+    sendToClient(sock, out.c_str(), (int)out.size());
+}
+
 // ============================================================================
 // Route handlers
 // ============================================================================
@@ -435,10 +447,25 @@ std::string WebServer::handleStatusPage()
 
     h << R"(</div>
 <div class="nav">
+  <a href="/">Home</a>
+  <a href="/state">Status</a>
   <a href="/api/dataref?name=sim/time/total_running_time_sec">&#128225; Try a dataref</a>
   <a href="#datarefs">&#128203; Datarefs</a>
   <a href="#commands">&#9000; Commands</a>
 </div>
+)";
+    const auto& htmlFiles = m_staticServer.getHtmlFiles();
+    if (!htmlFiles.empty()) {
+        h << "<h2>Detected pages</h2>\n<div class=\"nav\">\n";
+        for (const auto& f : htmlFiles) {
+            std::string base = f;
+            size_t dot = base.find_last_of('.');
+            if (dot != std::string::npos) base = base.substr(0, dot);
+            h << "  <a href=\"/" << f << "\">" << base << "</a>\n";
+        }
+        h << "</div>\n";
+    }
+    h << R"(
 <h2>API endpoints</h2>
 <table>
 <tr><th>Method</th><th>Path</th><th>Body / query</th><th>Description</th></tr>
@@ -505,17 +532,29 @@ void WebServer::onMessageReceived(int clientSocket, const char* msg, int length)
 {
     if (!m_registry) {
         sendHttp(clientSocket, 500, "text/plain", "registry not initialised");
+        closesocket(clientSocket);
         return;
     }
 
-    HttpRequest req = parseRequest(msg, length);
+    // Capture the first packet and socket locally, then spawn a detached thread
+    std::string firstPacket(msg, length);
+    std::thread([this, clientSocket, firstPacket]() {
+        this->processRequest(clientSocket, firstPacket);
+        closesocket(clientSocket);
+    }).detach();
+}
+
+void WebServer::processRequest(int clientSocket, const std::string& msgStr)
+{
+    HttpRequest req = parseRequest(msgStr.c_str(), (int)msgStr.length());
 
     // --- robust body reading for split packets (Invoke-RestMethod sends headers and body separately) ---
-    if (req.contentLength > 0 && req.body.length() < req.contentLength) {
+    // Only read body for methods that expect one — GET with spurious Content-Length would block forever
+    if ((req.method == "POST" || req.method == "PUT" || req.method == "PATCH") &&
+        req.contentLength > 0 && req.body.length() < req.contentLength) {
         size_t remaining = req.contentLength - req.body.length();
         char buf[2048];
         
-        // Loop to read the rest of the body from the socket
         while (remaining > 0) {
             int received = recv(clientSocket, buf, (int)(std::min)(remaining, sizeof(buf)), 0);
             if (received <= 0) break; // socket closed or error
@@ -535,7 +574,18 @@ void WebServer::onMessageReceived(int clientSocket, const char* msg, int length)
     int         statusCode  = 200;
 
     // ---- routes ----
-    if (req.path == "/" || req.path == "/index.html") {
+    if (req.path == "/" || req.path.empty()) {
+        if (m_staticServer.hasIndexHtml()) {
+            bool ok = m_staticServer.serveStaticFile("/", body, contentType, statusCode);
+            if (!ok) {
+                sendRedirect(clientSocket, "/state");
+                return;
+            }
+        } else {
+            sendRedirect(clientSocket, "/state");
+            return;
+        }
+    } else if (req.path == "/state") {
         body        = handleStatusPage();
         contentType = "text/html";
 
@@ -559,8 +609,17 @@ void WebServer::onMessageReceived(int clientSocket, const char* msg, int length)
         body = handleCommand(req.path, req.body, statusCode);
 
     } else {
-        statusCode  = 404;
-        body        = json{{"error", "endpoint not found"}, {"path", req.path}}.dump(2);
+        // Fallback to static file server
+        bool isStatic = false;
+        if (req.method == "GET") {
+            isStatic = m_staticServer.serveStaticFile(req.path, body, contentType, statusCode);
+        }
+
+        if (!isStatic) {
+            statusCode  = 404;
+            contentType = "application/json";
+            body        = json{{"error", "endpoint or file not found"}, {"path", req.path}}.dump(2);
+        }
     }
 
     sendHttp(clientSocket, statusCode, contentType, body);

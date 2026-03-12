@@ -57,6 +57,8 @@ int TcpListener::run()
                     closesocket(sock);
                     FD_CLR(sock, &m_master);
                 } else {
+                    // Hand off socket to the message receiver (for detached thread processing)
+                    FD_CLR(sock, &m_master);
                     onMessageReceived((int)sock, buf, bytesIn);
                 }
             }
@@ -74,7 +76,15 @@ int TcpListener::run()
 }
 
 void TcpListener::stop()                                           { m_running = false; }
-void TcpListener::sendToClient(int s, const char* msg, int len)   { send((SOCKET)s, msg, len, 0); }
+void TcpListener::sendToClient(int s, const char* msg, int len)
+{
+    int sent = 0;
+    while (sent < len) {
+        int n = send((SOCKET)s, msg + sent, len - sent, 0);
+        if (n <= 0) break;
+        sent += n;
+    }
+}
 void TcpListener::onClientConnected(int)    {}
 void TcpListener::onClientDisconnected(int) {}
 void TcpListener::onMessageReceived(int, const char*, int) {}

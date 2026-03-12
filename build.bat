@@ -58,6 +58,10 @@ if "%DEPLOY%"=="1" (
     echo Deploying to %DEPLOY_DIR% ...
     if not exist "%DEPLOY_DIR%" mkdir "%DEPLOY_DIR%"
     copy /Y "build\%CONFIG%\win.xpl" "%DEPLOY_DIR%\win.xpl"
+    
+    echo Deploying static web files to %DEPLOY_DIR%\..\www ...
+    xcopy /E /I /Y "www" "%DEPLOY_DIR%\..\www"
+
     if %ERRORLEVEL% == 0 (
         echo Deploy OK.
     ) else (

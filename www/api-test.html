@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>xplapi — API test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Consolas', 'Courier New', monospace; background: #0d1117; color: #c9d1d9; padding: 24px; line-height: 1.5; }
+    h1 { color: #58a6ff; font-size: 1.6em; margin-bottom: 4px; }
+    .subtitle { color: #8b949e; font-size: .9em; margin-bottom: 24px; }
+    h2 { color: #79c0ff; font-size: 1em; text-transform: uppercase; letter-spacing: .1em;
+        border-bottom: 1px solid #21262d; padding-bottom: 6px; margin: 24px 0 12px; }
+    .section { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+    .section label { display: block; color: #8b949e; font-size: .85em; margin-bottom: 6px; }
+    input[type="text"], textarea {
+      width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+      color: #e6edf3; padding: 8px 12px; font-family: inherit; font-size: .9em;
+    }
+    textarea { min-height: 80px; resize: vertical; }
+    button {
+      background: #238636; color: #fff; border: 1px solid #2ea043; border-radius: 6px;
+      padding: 6px 16px; font-size: .9em; cursor: pointer; margin-top: 10px;
+    }
+    button:hover { background: #2ea043; }
+    .result { margin-top: 12px; padding: 12px; border-radius: 4px; font-size: .88em; white-space: pre-wrap; word-break: break-all; }
+    .result.ok { background: #0f2c18; border: 1px solid #238636; color: #3fb950; }
+    .result.err { background: #2d1316; border: 1px solid #6e2020; color: #f85149; }
+    .result .status { font-weight: bold; margin-bottom: 4px; }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .nav { margin-bottom: 24px; display: flex; gap: 16px; flex-wrap: wrap; }
+    .nav a { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 5px 14px; font-size: .9em; }
+  </style>
+</head>
+<body>
+  <h1>xplapi</h1>
+  <p class="subtitle">API test — try endpoints from the browser</p>
+  <div class="nav">
+    <a href="/">Home</a>
+    <a href="/state">Status</a>
+  </div>
+
+  <h2>GET /api/dataref</h2>
+  <div class="section">
+    <label>Dataref name</label>
+    <input type="text" id="get-dataref" placeholder="sim/time/total_running_time_sec"/>
+    <button onclick="callGetDataref()">Execute</button>
+    <div id="result-get-dataref" class="result" style="display:none"></div>
+  </div>
+
+  <h2>POST /api/dataref/get</h2>
+  <div class="section">
+    <label>Request body (JSON)</label>
+    <textarea id="post-dataref-get" placeholder='{"name": "sim/time/total_running_time_sec"}'></textarea>
+    <button onclick="callPost('/api/dataref/get', 'post-dataref-get', 'result-post-get')">Execute</button>
+    <div id="result-post-get" class="result" style="display:none"></div>
+  </div>
+
+  <h2>POST /api/dataref/getMultiple</h2>
+  <div class="section">
+    <label>Request body (JSON array or {"names": [...]})</label>
+    <textarea id="post-dataref-getMultiple" placeholder='["sim/time/total_running_time_sec", "sim/cockpit2/gauges/indicators/airspeed_kts_pilot"]'></textarea>
+    <button onclick="callPost('/api/dataref/getMultiple', 'post-dataref-getMultiple', 'result-post-getMultiple')">Execute</button>
+    <div id="result-post-getMultiple" class="result" style="display:none"></div>
+  </div>
+
+  <h2>POST /api/dataref/set</h2>
+  <div class="section">
+    <label>Request body (JSON)</label>
+    <textarea id="post-dataref-set" placeholder='{"name": "sim/graphics/view/pilots_head_psi", "value": 45.0}'></textarea>
+    <button onclick="callPost('/api/dataref/set', 'post-dataref-set', 'result-post-set')">Execute</button>
+    <div id="result-post-set" class="result" style="display:none"></div>
+  </div>
+
+  <h2>POST /api/dataref/setMultiple</h2>
+  <div class="section">
+    <label>Request body (JSON array)</label>
+    <textarea id="post-dataref-setMultiple" placeholder='[{"name": "sim/graphics/view/pilots_head_psi", "value": -45.0}]'></textarea>
+    <button onclick="callPost('/api/dataref/setMultiple', 'post-dataref-setMultiple', 'result-post-setMultiple')">Execute</button>
+    <div id="result-post-setMultiple" class="result" style="display:none"></div>
+  </div>
+
+  <h2>POST /api/command/once</h2>
+  <div class="section">
+    <label>Request body (JSON)</label>
+    <textarea id="post-command-once" placeholder='{"name": "sim/annunciator/test_all_annunciators"}'></textarea>
+    <button onclick="callPost('/api/command/once', 'post-command-once', 'result-command-once')">Execute</button>
+    <div id="result-command-once" class="result" style="display:none"></div>
+  </div>
+
+  <h2>POST /api/command/begin</h2>
+  <div class="section">
+    <label>Request body (JSON)</label>
+    <textarea id="post-command-begin" placeholder='{"name": "sim/flight_controls/brakes_regular"}'></textarea>
+    <button onclick="callPost('/api/command/begin', 'post-command-begin', 'result-command-begin')">Execute</button>
+    <div id="result-command-begin" class="result" style="display:none"></div>
+  </div>
+
+  <h2>POST /api/command/end</h2>
+  <div class="section">
+    <label>Request body (JSON)</label>
+    <textarea id="post-command-end" placeholder='{"name": "sim/flight_controls/brakes_regular"}'></textarea>
+    <button onclick="callPost('/api/command/end', 'post-command-end', 'result-command-end')">Execute</button>
+    <div id="result-command-end" class="result" style="display:none"></div>
+  </div>
+
+  <script>
+    function showResult(elId, statusCode, body, ok) {
+      const el = document.getElementById(elId);
+      el.style.display = 'block';
+      el.className = 'result ' + (ok ? 'ok' : 'err');
+      el.innerHTML = '<span class="status">Status: ' + statusCode + '</span>\n' + body;
+    }
+
+    async function callGetDataref() {
+      const name = document.getElementById('get-dataref').value.trim();
+      const resultEl = document.getElementById('result-get-dataref');
+      if (!name) {
+        showResult('result-get-dataref', 0, 'Enter a dataref name', false);
+        return;
+      }
+      try {
+        const r = await fetch('/api/dataref?name=' + encodeURIComponent(name));
+        const text = await r.text();
+        let body;
+        try { body = JSON.stringify(JSON.parse(text), null, 2); } catch (_) { body = text; }
+        showResult('result-get-dataref', r.status, body, r.ok);
+      } catch (e) {
+        showResult('result-get-dataref', 0, 'Error: ' + e.message, false);
+      }
+    }
+
+    async function callPost(path, bodyId, resultId) {
+      const bodyEl = document.getElementById(bodyId);
+      let body;
+      try {
+        body = bodyEl.value.trim() || '{}';
+        JSON.parse(body);
+      } catch (e) {
+        showResult(resultId, 0, 'Invalid JSON: ' + e.message, false);
+        return;
+      }
+      try {
+        const r = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: body
+        });
+        const text = await r.text();
+        let out;
+        try { out = JSON.stringify(JSON.parse(text), null, 2); } catch (_) { out = text; }
+        showResult(resultId, r.status, out, r.ok);
+      } catch (e) {
+        showResult(resultId, 0, 'Error: ' + e.message, false);
+      }
+    }
+  </script>
+</body>
+</html>

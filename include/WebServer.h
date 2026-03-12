@@ -1,7 +1,9 @@
 #pragma once
 #include "TcpListener.h"
 #include "DataRefRegistry.h"
+#include "StaticFileServer.h"
 #include <string>
+#include <thread>
 
 // ---------------------------------------------------------------------------
 // WebServer — HTTP layer on top of TcpListener
@@ -17,6 +19,7 @@ public:
     WebServer() = default;
 
     void setRegistry(DataRefRegistry* reg) { m_registry = reg; }
+    void setPluginDir(const std::string& dir) { m_staticServer.setPluginDir(dir); }
 
 protected:
     void onMessageReceived(int clientSocket, const char* msg, int length) override;
@@ -25,6 +28,9 @@ protected:
 
 private:
     DataRefRegistry* m_registry { nullptr };
+    StaticFileServer m_staticServer;
+
+    void processRequest(int clientSocket, const std::string& msgStr);
 
     // Route handlers – return response body; set contentType and statusCode
     std::string handleStatusPage();
@@ -38,6 +44,7 @@ private:
     // Helpers
     void        sendHttp(int sock, int status, const std::string& contentType,
                          const std::string& body);
+    void        sendRedirect(int sock, const std::string& location);
 
     static std::string urlDecode(const std::string& s);
     static std::string queryParam(const std::string& path, const std::string& key);
