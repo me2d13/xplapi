@@ -288,16 +288,40 @@ print(read_dataref("sim/time/total_running_time_sec"))
 
 ---
 
+### `POST /api/command/once`
+### `POST /api/command/begin`
+### `POST /api/command/end`
+
+Trigger an X-Plane command. `once` is for fire-and-forget commands (like a button click). `begin` and `end` are for commands that you want to hold down (like a starter motor or hydraulic pump).
+
+**Request body**
+```json
+{
+  "name": "sim/annunciator/test_all_annunciators"
+}
+```
+
+**PowerShell example (Toggle pause)**
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://localhost:8012/api/command/once" -ContentType "application/json" -Body '{"name":"sim/operation/pause_toggle"}'
+```
+
+**PowerShell example (Hold Brakes)**
+```powershell
+# Hold brakes
+Invoke-RestMethod -Method Post -Uri "http://localhost:8012/api/command/begin" -ContentType "application/json" -Body '{"name":"sim/flight_controls/brakes_regular"}'
+
+# Release brakes
+Invoke-RestMethod -Method Post -Uri "http://localhost:8012/api/command/end" -ContentType "application/json" -Body '{"name":"sim/flight_controls/brakes_regular"}'
+```
+
+---
+
 ## Planned endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/command/once` | Trigger an X-Plane command once |
-| `POST` | `/api/command/begin` | Begin a held command |
-| `POST` | `/api/command/end` | End a held command |
 | `WS`   | `/api/dataref/watch` | WebSocket subscription — push updates at a configurable interval |
-
----
 
 ## Project structure
 

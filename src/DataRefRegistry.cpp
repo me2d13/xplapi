@@ -100,6 +100,35 @@ void DataRefRegistry::writeXplValue(DataRefEntry& entry, const json& val)
 }
 
 // ---------------------------------------------------------------------------
+// executeCommand — MUST be on XP main thread
+// ---------------------------------------------------------------------------
+void DataRefRegistry::executeCommand(const std::string& name, DataRefRegistry::CommandAction action)
+{
+    // Try to get cached handle; if not, find it.
+    XPLMCommandRef cmd = nullptr;
+    auto it = m_commands.find(name);
+    if (it != m_commands.end()) {
+        cmd = it->second;
+    } else {
+        cmd = XPLMFindCommand(name.c_str());
+        if (cmd) {
+            m_commands[name] = cmd;
+        } else {
+            XPLMDebugString(("xplapi: command not found: " + name + "\n").c_str());
+            return;
+        }
+    }
+
+    if (cmd) {
+        switch (action) {
+            case CommandAction::Once:  XPLMCommandOnce(cmd);  break;
+            case CommandAction::Begin: XPLMCommandBegin(cmd); break;
+            case CommandAction::End:   XPLMCommandEnd(cmd);   break;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // update — called from XP flight loop (main thread) every tick
 // ---------------------------------------------------------------------------
 void DataRefRegistry::update()
@@ -146,7 +175,13 @@ void DataRefRegistry::update()
         }
         m_writeQueue.clear();
 
-        // 3. Refresh all values
+        // 3. Process pending commands
+        for (const auto& cmd : m_commandQueue) {
+            executeCommand(cmd.name, cmd.action);
+        }
+        m_commandQueue.clear();
+
+        // 4. Refresh all values
         for (auto& [name, entry] : m_registry)
             readXplValue(entry);
         
@@ -164,6 +199,15 @@ void DataRefRegistry::queueWrite(const std::string& name, const json& value)
 {
     std::lock_guard<std::mutex> lk(m_mutex);
     m_writeQueue.push_back({ name, value });
+}
+
+// ---------------------------------------------------------------------------
+// queueCommand — adds a command request to the queue (called from HTTP thread)
+// ---------------------------------------------------------------------------
+void DataRefRegistry::queueCommand(const std::string& name, DataRefRegistry::CommandAction action)
+{
+    std::lock_guard<std::mutex> lk(m_mutex);
+    m_commandQueue.push_back({ name, action });
 }
 
 // ---------------------------------------------------------------------------
@@ -245,5 +289,18 @@ std::vector<DataRefRegistry::SnapEntry> DataRefRegistry::snapshot() const
     for (const auto& [name, entry] : m_registry)
         result.push_back({ name, entry.attempted, entry.found, entry.type, entry.count,
                            formatValueDisplay(entry) });
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// snapshotCommands — for status page
+// ---------------------------------------------------------------------------
+std::vector<std::string> DataRefRegistry::snapshotCommands() const
+{
+    std::lock_guard<std::mutex> lk(m_mutex);
+    std::vector<std::string> result;
+    result.reserve(m_commands.size());
+    for (const auto& [name, handle] : m_commands)
+        result.push_back(name);
     return result;
 }

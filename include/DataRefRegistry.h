@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <map>
 #include "XPLMDataAccess.h"
+#include "XPLMUtilities.h"
 #include "json.hpp"
 
 using json = nlohmann::json;
@@ -41,7 +42,11 @@ struct DataRefEntry {
 //     briefly while writing values; the HTTP thread holds it briefly while
 //     reading them.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 class DataRefRegistry {
+public:
+    enum class CommandAction { Once, Begin, End };
+
 public:
     // Called by HTTP handler (any thread): ensure the name is tracked.
     // Returns false if the name is already known to not exist in X-Plane.
@@ -76,12 +81,24 @@ public:
      */
     void queueWrite(const std::string& name, const json& value);
 
-    std::vector<SnapEntry> snapshot() const;
+    /**
+     * Queues a command execution request.
+     */
+    void queueCommand(const std::string& name, CommandAction action);
 
-    // New: Write support
+    std::vector<SnapEntry> snapshot() const;
+    std::vector<std::string> snapshotCommands() const;
+
+private:
+    // Write support
     struct WriteRequest {
         std::string name;
-        json        value; // Using json type directly for flexibility
+        json        value;
+    };
+
+    struct CommandRequest {
+        std::string   name;
+        CommandAction action;
     };
 
     mutable std::mutex                  m_mutex;
@@ -89,9 +106,12 @@ public:
     uint64_t                            m_updateCounter{ 0 };
     std::map<std::string, DataRefEntry> m_registry;
     std::vector<WriteRequest>           m_writeQueue;
+    std::vector<CommandRequest>         m_commandQueue;
+    std::map<std::string, XPLMCommandRef> m_commands; // cached command handles
 
     // Internal: must be called on XP main thread, mutex NOT held
     bool tryResolve(const std::string& name, DataRefEntry& entry);
     void readXplValue(DataRefEntry& entry);
     void writeXplValue(DataRefEntry& entry, const json& value);
+    void executeCommand(const std::string& name, CommandAction action);
 };

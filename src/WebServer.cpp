@@ -345,7 +345,33 @@ std::string WebServer::handleSetMultiple(const std::string& body, int& statusCod
     }
 }
 
-// GET /  —  status HTML page
+// POST /api/command/{once|begin|end}  body: {"name": "sim/..."}
+std::string WebServer::handleCommand(const std::string& path, const std::string& body, int& statusCode)
+{
+    try {
+        auto j = json::parse(body);
+        if (!j.contains("name")) {
+            statusCode = 400;
+            return json{{"error", "missing 'name' field"}}.dump(2);
+        }
+
+        std::string commandName = j["name"];
+        DataRefRegistry::CommandAction action = DataRefRegistry::CommandAction::Once;
+
+        if (path.find("/once") != std::string::npos)       action = DataRefRegistry::CommandAction::Once;
+        else if (path.find("/begin") != std::string::npos) action = DataRefRegistry::CommandAction::Begin;
+        else if (path.find("/end") != std::string::npos)   action = DataRefRegistry::CommandAction::End;
+
+        m_registry->queueCommand(commandName, action);
+        
+        statusCode = 200;
+        return json{{"name", commandName}, {"status", "ok"}}.dump(2);
+
+    } catch (const json::exception& e) {
+        statusCode = 400;
+        return json{{"error", std::string("invalid JSON: ") + e.what()}}.dump(2);
+    }
+}
 std::string WebServer::handleStatusPage()
 {
     auto entries = m_registry ? m_registry->snapshot() : std::vector<DataRefRegistry::SnapEntry>{};
@@ -410,7 +436,8 @@ std::string WebServer::handleStatusPage()
     h << R"(</div>
 <div class="nav">
   <a href="/api/dataref?name=sim/time/total_running_time_sec">&#128225; Try a dataref</a>
-  <a href="#datarefs">&#128203; Tracked datarefs</a>
+  <a href="#datarefs">&#128203; Datarefs</a>
+  <a href="#commands">&#9000; Commands</a>
 </div>
 <h2>API endpoints</h2>
 <table>
@@ -420,6 +447,9 @@ std::string WebServer::handleStatusPage()
 <tr><td>POST</td><td>/api/dataref/getMultiple</td><td>["sim/...", ...]</td><td>Read multiple datarefs</td></tr>
 <tr><td>POST</td><td>/api/dataref/set</td><td>{"name":"...", "value":...}</td><td>Write single dataref</td></tr>
 <tr><td>POST</td><td>/api/dataref/setMultiple</td><td>[{"name":"...", "value":...}, ...]</td><td>Write multiple datarefs</td></tr>
+<tr><td>POST</td><td>/api/command/once</td><td>{"name":"sim/..."}</td><td>Trigger command once</td></tr>
+<tr><td>POST</td><td>/api/command/begin</td><td>{"name":"sim/..."}</td><td>Begin held command</td></tr>
+<tr><td>POST</td><td>/api/command/end</td><td>{"name":"sim/..."}</td><td>End held command</td></tr>
 </table>
 <h2 id="datarefs">Tracked datarefs ()" << entries.size() << R"()</h2>
 )";
@@ -447,6 +477,18 @@ std::string WebServer::handleStatusPage()
                 h << "<td></td><td></td><td><span class=\"badge-err\">not found</span></td>";
             }
             h << "</tr>\n";
+        }
+        h << "</table>\n";
+    }
+
+    auto commands = m_registry ? m_registry->snapshotCommands() : std::vector<std::string>{};
+    h << "<h2 id=\"commands\">Known Commands (" << commands.size() << ")</h2>\n";
+    if (commands.empty()) {
+        h << "<p class=\"empty\">No commands executed yet. Call /api/command/once to start.</p>\n";
+    } else {
+        h << "<table>\n<tr><th>Command Path</th></tr>\n";
+        for (const auto& cmd : commands) {
+            h << "<tr><td class=\"dr-name\">" << cmd << "</td></tr>\n";
         }
         h << "</table>\n";
     }
@@ -512,6 +554,9 @@ void WebServer::onMessageReceived(int clientSocket, const char* msg, int length)
 
     } else if (req.method == "POST" && req.path == "/api/dataref/setMultiple") {
         body = handleSetMultiple(req.body, statusCode);
+
+    } else if (req.method == "POST" && req.path.find("/api/command/") == 0) {
+        body = handleCommand(req.path, req.body, statusCode);
 
     } else {
         statusCode  = 404;
