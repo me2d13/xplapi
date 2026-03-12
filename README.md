@@ -225,6 +225,44 @@ curl -X POST http://localhost:8012/api/dataref/getMultiple \
 
 ---
 
+### `POST /api/dataref/set`
+
+Write a value to a dataref. Returns the state of the dataref after the write.
+
+**Request body**
+```json
+{
+  "name": "sim/graphics/view/pilots_head_psi",
+  "value": 45.0
+}
+```
+
+**PowerShell example**
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://localhost:8012/api/dataref/set" -ContentType "application/json" -Body '{"name":"sim/graphics/view/pilots_head_psi", "value":45.0}'
+```
+
+---
+
+### `POST /api/dataref/setMultiple`
+
+Write multiple values in one request.
+
+**Request body**
+```json
+[
+  { "name": "sim/graphics/view/pilots_head_psi", "value": -45.0 },
+  { "name": "sim/graphics/view/pilots_head_the", "value": -15.0 }
+]
+```
+
+**PowerShell example**
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://localhost:8012/api/dataref/setMultiple" -ContentType "application/json" -Body '[{"name":"sim/graphics/view/pilots_head_psi", "value":-45.0}, {"name":"sim/graphics/view/pilots_head_the", "value":-15.0}]'
+```
+
+---
+
 ## Typical usage pattern
 
 On first contact the plugin needs one flight-loop tick (~100 ms) to resolve a new dataref name.  
@@ -254,8 +292,6 @@ print(read_dataref("sim/time/total_running_time_sec"))
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/dataref/set` | Write a single dataref |
-| `POST` | `/api/dataref/setMultiple` | Write multiple datarefs |
 | `POST` | `/api/command/once` | Trigger an X-Plane command once |
 | `POST` | `/api/command/begin` | Begin a held command |
 | `POST` | `/api/command/end` | End a held command |

@@ -31,6 +31,8 @@ private:
     std::string handleGetOne(const std::string& name, int& statusCode);
     std::string handleGetOneBody(const std::string& body, int& statusCode);
     std::string handleGetMultiple(const std::string& body, int& statusCode);
+    std::string handleSet(const std::string& body, int& statusCode);
+    std::string handleSetMultiple(const std::string& body, int& statusCode);
 
     // Helpers
     void        sendHttp(int sock, int status, const std::string& contentType,

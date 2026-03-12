@@ -3,6 +3,7 @@
 #include "XPLMUtilities.h"
 #include "XPLMDataAccess.h"
 #include "plugin.h"
+#include <WinSock2.h>
 
 #include <sstream>
 #include <string>
@@ -20,6 +21,7 @@ struct HttpRequest {
     std::string path;           // without query string
     std::string query;          // everything after '?'
     std::string body;           // request body (for POST)
+    size_t      contentLength{ 0 };
 };
 
 static HttpRequest parseRequest(const char* raw, int len)
@@ -42,10 +44,22 @@ static HttpRequest parseRequest(const char* raw, int len)
         req.path = target;
     }
 
-    // --- body: everything after the blank line "\r\n\r\n" ---
-    auto bodyStart = text.find("\r\n\r\n");
-    if (bodyStart != std::string::npos)
-        req.body = text.substr(bodyStart + 4);
+    // --- headers: extract Content-Length ---
+    auto headersEnd = text.find("\r\n\r\n");
+    if (headersEnd != std::string::npos) {
+        std::string headers = text.substr(0, headersEnd);
+        size_t clPos = headers.find("Content-Length:");
+        if (clPos == std::string::npos) clPos = headers.find("content-length:");
+        
+        if (clPos != std::string::npos) {
+            size_t valPos = headers.find_first_of("0123456789", clPos);
+            if (valPos != std::string::npos) {
+                req.contentLength = std::stoul(headers.substr(valPos));
+            }
+        }
+        
+        req.body = text.substr(headersEnd + 4);
+    }
 
     return req;
 }
@@ -267,6 +281,70 @@ std::string WebServer::handleGetMultiple(const std::string& body, int& statusCod
     }
 }
 
+// POST /api/dataref/set    body: {"name": "sim/...", "value": 123}
+std::string WebServer::handleSet(const std::string& body, int& statusCode)
+{
+    try {
+        auto j = json::parse(body);
+        if (!j.contains("name") || !j.contains("value")) {
+            statusCode = 400;
+            return json{{"error", "missing 'name' or 'value' field"}}.dump(2);
+        }
+
+        std::string name = j["name"];
+        m_registry->queueWrite(name, j["value"]);
+        m_registry->waitForUpdate(200);
+
+        DataRefEntry entry;
+        m_registry->readValue(name, entry);
+        statusCode = 200;
+        return entryToJson(name, entry).dump(2);
+
+    } catch (const json::exception& e) {
+        statusCode = 400;
+        return json{{"error", std::string("invalid JSON: ") + e.what()}}.dump(2);
+    }
+}
+
+// POST /api/dataref/setMultiple    body: [{"name":"sim/...", "value":123}, ...]
+std::string WebServer::handleSetMultiple(const std::string& body, int& statusCode)
+{
+    try {
+        auto j = json::parse(body);
+        json writes;
+        if (j.is_array()) writes = j;
+        else if (j.is_object() && j.contains("writes")) writes = j["writes"];
+        else {
+            statusCode = 400;
+            return json{{"error", "body must be array or {\"writes\":[...] "}}.dump(2);
+        }
+
+        std::vector<std::string> names;
+        for (const auto& w : writes) {
+            if (!w.is_object() || !w.contains("name") || !w.contains("value")) continue;
+            std::string name = w["name"];
+            m_registry->queueWrite(name, w["value"]);
+            names.push_back(name);
+        }
+
+        m_registry->waitForUpdate(400); // Batch might take slightly longer to resolve all
+
+        json result = json::array();
+        for (const auto& name : names) {
+            DataRefEntry entry;
+            m_registry->readValue(name, entry);
+            result.push_back(entryToJson(name, entry));
+        }
+
+        statusCode = 200;
+        return result.dump(2);
+
+    } catch (const json::exception& e) {
+        statusCode = 400;
+        return json{{"error", std::string("invalid JSON: ") + e.what()}}.dump(2);
+    }
+}
+
 // GET /  —  status HTML page
 std::string WebServer::handleStatusPage()
 {
@@ -340,6 +418,8 @@ std::string WebServer::handleStatusPage()
 <tr><td>GET</td><td>/api/dataref</td><td>?name=sim/...</td><td>Read single dataref</td></tr>
 <tr><td>POST</td><td>/api/dataref/get</td><td>{"name":"sim/..."}</td><td>Read single dataref</td></tr>
 <tr><td>POST</td><td>/api/dataref/getMultiple</td><td>["sim/...", ...]</td><td>Read multiple datarefs</td></tr>
+<tr><td>POST</td><td>/api/dataref/set</td><td>{"name":"...", "value":...}</td><td>Write single dataref</td></tr>
+<tr><td>POST</td><td>/api/dataref/setMultiple</td><td>[{"name":"...", "value":...}, ...]</td><td>Write multiple datarefs</td></tr>
 </table>
 <h2 id="datarefs">Tracked datarefs ()" << entries.size() << R"()</h2>
 )";
@@ -388,6 +468,20 @@ void WebServer::onMessageReceived(int clientSocket, const char* msg, int length)
 
     HttpRequest req = parseRequest(msg, length);
 
+    // --- robust body reading for split packets (Invoke-RestMethod sends headers and body separately) ---
+    if (req.contentLength > 0 && req.body.length() < req.contentLength) {
+        size_t remaining = req.contentLength - req.body.length();
+        char buf[2048];
+        
+        // Loop to read the rest of the body from the socket
+        while (remaining > 0) {
+            int received = recv(clientSocket, buf, (int)(std::min)(remaining, sizeof(buf)), 0);
+            if (received <= 0) break; // socket closed or error
+            req.body.append(buf, received);
+            remaining -= received;
+        }
+    }
+
     // OPTIONS pre-flight for CORS
     if (req.method == "OPTIONS") {
         sendHttp(clientSocket, 200, "text/plain", "");
@@ -412,6 +506,12 @@ void WebServer::onMessageReceived(int clientSocket, const char* msg, int length)
 
     } else if (req.method == "POST" && req.path == "/api/dataref/getMultiple") {
         body = handleGetMultiple(req.body, statusCode);
+
+    } else if (req.method == "POST" && req.path == "/api/dataref/set") {
+        body = handleSet(req.body, statusCode);
+
+    } else if (req.method == "POST" && req.path == "/api/dataref/setMultiple") {
+        body = handleSetMultiple(req.body, statusCode);
 
     } else {
         statusCode  = 404;

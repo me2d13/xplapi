@@ -1,7 +1,11 @@
 #include "DataRefRegistry.h"
 #include "XPLMDataAccess.h"
 #include "XPLMUtilities.h"
+#include "json.hpp"
 #include <string>
+#include <algorithm>
+
+using json = nlohmann::json;
 
 // ---------------------------------------------------------------------------
 // ensureTracked — called from HTTP thread; just inserts an unresolved slot
@@ -65,6 +69,37 @@ void DataRefRegistry::readXplValue(DataRefEntry& entry)
 }
 
 // ---------------------------------------------------------------------------
+// writeXplValue — writes value to X-Plane; MUST be on XP main thread
+// ---------------------------------------------------------------------------
+void DataRefRegistry::writeXplValue(DataRefEntry& entry, const json& val)
+{
+    if (!entry.found || entry.dataRef == nullptr) return;
+
+    if (entry.type & xplmType_Float) {
+        if (val.is_number()) XPLMSetDataf(entry.dataRef, val.get<float>());
+    } else if (entry.type & xplmType_Int) {
+        if (val.is_number()) XPLMSetDatai(entry.dataRef, val.get<int>());
+    } else if (entry.type & xplmType_FloatArray) {
+        if (val.is_array()) {
+            std::vector<float> fv = val.get<std::vector<float>>();
+            int count = (int)fv.size();
+            XPLMSetDatavf(entry.dataRef, fv.data(), 0, count);
+        }
+    } else if (entry.type & xplmType_IntArray) {
+        if (val.is_array()) {
+            std::vector<int> iv = val.get<std::vector<int>>();
+            int count = (int)iv.size();
+            XPLMSetDatavi(entry.dataRef, iv.data(), 0, count);
+        }
+    } else if (entry.type & xplmType_Data) {
+        if (val.is_string()) {
+            std::string s = val.get<std::string>();
+            XPLMSetDatab(entry.dataRef, (void*)s.c_str(), 0, (int)s.size());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // update — called from XP flight loop (main thread) every tick
 // ---------------------------------------------------------------------------
 void DataRefRegistry::update()
@@ -79,8 +114,7 @@ void DataRefRegistry::update()
         }
     }
 
-    // Resolve outside the lock (XPLM functions must not be called under our lock
-    // since X-Plane itself is single-threaded and we're on the main thread here)
+    // Resolve outside the lock ... (unchanged logic)
     std::vector<std::pair<std::string, DataRefEntry>> resolved;
     for (const auto& name : toResolve) {
         DataRefEntry e{};
@@ -88,12 +122,31 @@ void DataRefRegistry::update()
         resolved.emplace_back(name, e);
     }
 
-    // Write resolved entries back + refresh all values
+    // Process writes + refresh all values
     {
         std::lock_guard<std::mutex> lk(m_mutex);
+        
+        // 1. Resolve new entries
         for (auto& [name, e] : resolved)
             m_registry[name] = e;
 
+        // 2. Process pending writes
+        for (const auto& w : m_writeQueue) {
+            auto it = m_registry.find(w.name);
+            if (it == m_registry.end()) {
+                // Not tracked? Resolve first.
+                DataRefEntry e{};
+                if (tryResolve(w.name, e)) {
+                    m_registry[w.name] = e;
+                    writeXplValue(e, w.value);
+                }
+            } else {
+                writeXplValue(it->second, w.value);
+            }
+        }
+        m_writeQueue.clear();
+
+        // 3. Refresh all values
         for (auto& [name, entry] : m_registry)
             readXplValue(entry);
         
@@ -102,6 +155,15 @@ void DataRefRegistry::update()
 
     // Wake up any HTTP threads waiting for this update
     m_cv.notify_all();
+}
+
+// ---------------------------------------------------------------------------
+// queueWrite — adds a write request to the queue (called from HTTP thread)
+// ---------------------------------------------------------------------------
+void DataRefRegistry::queueWrite(const std::string& name, const json& value)
+{
+    std::lock_guard<std::mutex> lk(m_mutex);
+    m_writeQueue.push_back({ name, value });
 }
 
 // ---------------------------------------------------------------------------

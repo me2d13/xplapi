@@ -5,6 +5,9 @@
 #include <condition_variable>
 #include <map>
 #include "XPLMDataAccess.h"
+#include "json.hpp"
+
+using json = nlohmann::json;
 
 // ---------------------------------------------------------------------------
 // Internal value cache for one X-Plane dataref
@@ -68,15 +71,27 @@ public:
      */
     bool waitForUpdate(int timeoutMs);
 
+    /**
+     * Queues a write request to be processed by the next flight loop update.
+     */
+    void queueWrite(const std::string& name, const json& value);
+
     std::vector<SnapEntry> snapshot() const;
 
-private:
-    mutable std::mutex      m_mutex;
-    std::condition_variable m_cv;
-    uint64_t                m_updateCounter{ 0 };
+    // New: Write support
+    struct WriteRequest {
+        std::string name;
+        json        value; // Using json type directly for flexibility
+    };
+
+    mutable std::mutex                  m_mutex;
+    std::condition_variable             m_cv;
+    uint64_t                            m_updateCounter{ 0 };
     std::map<std::string, DataRefEntry> m_registry;
+    std::vector<WriteRequest>           m_writeQueue;
 
     // Internal: must be called on XP main thread, mutex NOT held
     bool tryResolve(const std::string& name, DataRefEntry& entry);
     void readXplValue(DataRefEntry& entry);
+    void writeXplValue(DataRefEntry& entry, const json& value);
 };
