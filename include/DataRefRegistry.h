@@ -1,8 +1,9 @@
 #pragma once
 #include <string>
-#include <unordered_map>
 #include <vector>
 #include <mutex>
+#include <condition_variable>
+#include <map>
 #include "XPLMDataAccess.h"
 
 // ---------------------------------------------------------------------------
@@ -17,11 +18,12 @@ union XplValue {
 };
 
 struct DataRefEntry {
-    XPLMDataRef dataRef  { nullptr };
-    int         type     { 0 };       // xplmType_* bitmask
-    int         count    { 0 };       // for array types
-    XplValue    value    {};
-    bool        found    { false };   // false = XPLMFindDataRef returned null
+    XPLMDataRef dataRef   { nullptr };
+    int         type      { 0 };       // xplmType_* bitmask
+    int         count     { 0 };       // for array types
+    XplValue    value     {};
+    bool        attempted { false };   // true once the flight loop has called XPLMFindDataRef
+    bool        found     { false };   // true if XPLMFindDataRef succeeded
 };
 
 // ---------------------------------------------------------------------------
@@ -53,15 +55,26 @@ public:
     // Snapshot of all currently tracked entries (for status page)
     struct SnapEntry {
         std::string name;
+        bool        attempted;
         bool        found;
         int         type;
         int         count;
+        std::string valueDisplay;  // pre-formatted for the status page; empty if not yet resolved
     };
+
+    /**
+     * Blocks the calling thread until the next update() cycle completes
+     * or the timeout is reached. Returns true if an update happened.
+     */
+    bool waitForUpdate(int timeoutMs);
+
     std::vector<SnapEntry> snapshot() const;
 
 private:
-    mutable std::mutex                            m_mutex;
-    std::unordered_map<std::string, DataRefEntry> m_registry;
+    mutable std::mutex      m_mutex;
+    std::condition_variable m_cv;
+    uint64_t                m_updateCounter{ 0 };
+    std::map<std::string, DataRefEntry> m_registry;
 
     // Internal: must be called on XP main thread, mutex NOT held
     bool tryResolve(const std::string& name, DataRefEntry& entry);

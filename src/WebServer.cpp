@@ -172,14 +172,21 @@ std::string WebServer::handleGetOne(const std::string& name, int& statusCode)
         return json{{"error", "missing 'name' query parameter"}}.dump(2);
     }
 
-    // Ensure the registry knows about this name (it will resolve on next flight-loop tick)
+    // Ensure the registry knows about this name
     m_registry->ensureTracked(name);
 
     DataRefEntry entry;
-    bool ready = m_registry->readValue(name, entry);
+    m_registry->readValue(name, entry);
 
-    if (!ready && !entry.found) {
-        // Not resolved yet — return a "pending" response rather than a 404
+    if (!entry.attempted) {
+        // First time seeing this! Wait for up to 200ms for the flight loop to update.
+        m_registry->waitForUpdate(200);
+        // Try reading again after the wait
+        m_registry->readValue(name, entry);
+    }
+
+    if (!entry.attempted) {
+        // Still not resolved (maybe XP flight loop is paused or very slow)
         statusCode = 200;
         return json{{"name", name}, {"status", "pending"}}.dump(2);
     }
@@ -219,19 +226,35 @@ std::string WebServer::handleGetMultiple(const std::string& body, int& statusCod
             return json{{"error", "body must be a JSON array or {\"names\":[...]}"}}.dump(2);
         }
 
+        bool anyNew = false;
+        for (const auto& nameVal : names) {
+            if (!nameVal.is_string()) continue;
+            std::string name = nameVal.get<std::string>();
+            
+            DataRefEntry entry;
+            m_registry->readValue(name, entry);
+            if (!entry.attempted) {
+                m_registry->ensureTracked(name);
+                anyNew = true;
+            }
+        }
+
+        if (anyNew) {
+            m_registry->waitForUpdate(200);
+        }
+
         json result = json::array();
         for (const auto& nameVal : names) {
             if (!nameVal.is_string()) continue;
             std::string name = nameVal.get<std::string>();
-            m_registry->ensureTracked(name);
 
             DataRefEntry entry;
-            bool ready = m_registry->readValue(name, entry);
-
-            if (!ready && !entry.found) {
+            if (m_registry->readValue(name, entry)) {
+                result.push_back(entryToJson(name, entry));
+            } else if (!entry.attempted) {
                 result.push_back(json{{"name", name}, {"status", "pending"}});
             } else {
-                result.push_back(entryToJson(name, entry));
+                result.push_back(entryToJson(name, entry)); // Error object
             }
         }
 
@@ -284,6 +307,7 @@ std::string WebServer::handleStatusPage()
   td{padding:6px 12px;border-bottom:1px solid #161b22;vertical-align:top}
   .dr-name{color:#e6edf3;font-family:monospace}
   .dr-type{color:#79c0ff;font-size:.82em}
+  .dr-val {color:#3fb950;font-family:monospace;font-size:.88em;word-break:break-all}
   .badge-ok {display:inline-block;background:#0f2c18;color:#3fb950;
              border:1px solid #238636;border-radius:4px;padding:1px 8px;font-size:.78em}
   .badge-err{display:inline-block;background:#2d1316;color:#f85149;
@@ -323,7 +347,7 @@ std::string WebServer::handleStatusPage()
     if (entries.empty()) {
         h << "<p class=\"empty\">No datarefs tracked yet. Call /api/dataref?name=... to start.</p>\n";
     } else {
-        h << "<table>\n<tr><th>Name</th><th>Type</th><th>Status</th></tr>\n";
+        h << "<table>\n<tr><th>Name</th><th>Type</th><th>Value</th><th>Status</th></tr>\n";
         for (const auto& e : entries) {
             h << "<tr><td class=\"dr-name\">" << e.name << "</td>";
             if (e.found) {
@@ -335,9 +359,12 @@ std::string WebServer::handleStatusPage()
                               : (e.type & xplmType_Int)        ? "int"
                               :                                   "?";
                 h << "<td class=\"dr-type\">" << t << "</td>"
+                  << "<td class=\"dr-val\">" << e.valueDisplay << "</td>"
                   << "<td><span class=\"badge-ok\">resolved</span></td>";
+            } else if (!e.attempted) {
+                h << "<td></td><td></td><td><span class=\"badge-pend\">pending</span></td>";
             } else {
-                h << "<td></td><td><span class=\"badge-err\">not found</span></td>";
+                h << "<td></td><td></td><td><span class=\"badge-err\">not found</span></td>";
             }
             h << "</tr>\n";
         }

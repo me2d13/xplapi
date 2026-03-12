@@ -17,6 +17,7 @@ void DataRefRegistry::ensureTracked(const std::string& name)
 // ---------------------------------------------------------------------------
 bool DataRefRegistry::tryResolve(const std::string& name, DataRefEntry& entry)
 {
+    entry.attempted = true;   // mark regardless of outcome
     entry.dataRef = XPLMFindDataRef(name.c_str());
     if (entry.dataRef == nullptr) {
         XPLMDebugString(("xplapi: dataref not found: " + name + "\n").c_str());
@@ -73,12 +74,8 @@ void DataRefRegistry::update()
     {
         std::lock_guard<std::mutex> lk(m_mutex);
         for (auto& [name, entry] : m_registry) {
-            if (entry.dataRef == nullptr && !entry.found) {
-                // entry.found == false AND dataRef == null means not yet attempted
-                // We mark found=true optimistically so we don't re-try every tick;
-                // tryResolve will set it back to false if lookup fails.
+            if (!entry.attempted)
                 toResolve.push_back(name);
-            }
         }
     }
 
@@ -99,7 +96,24 @@ void DataRefRegistry::update()
 
         for (auto& [name, entry] : m_registry)
             readXplValue(entry);
+        
+        m_updateCounter++;
     }
+
+    // Wake up any HTTP threads waiting for this update
+    m_cv.notify_all();
+}
+
+// ---------------------------------------------------------------------------
+// waitForUpdate — blocks calling thread until next update cycle
+// ---------------------------------------------------------------------------
+bool DataRefRegistry::waitForUpdate(int timeoutMs)
+{
+    std::unique_lock<std::mutex> lk(m_mutex);
+    uint64_t startCounter = m_updateCounter;
+    return m_cv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [this, startCounter] {
+        return m_updateCounter > startCounter;
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +129,50 @@ bool DataRefRegistry::readValue(const std::string& name, DataRefEntry& out) cons
 }
 
 // ---------------------------------------------------------------------------
+// formatValueDisplay — compact string representation for the status page
+// ---------------------------------------------------------------------------
+static std::string formatValueDisplay(const DataRefEntry& e)
+{
+    if (!e.found) return {};
+
+    // Helper to trim trailing zeros from to_string floats
+    auto fmtF = [](float v) -> std::string {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.6g", v);
+        return buf;
+    };
+
+    if (e.type & xplmType_FloatArray) {
+        int n = (std::min)(e.count, 6);
+        std::string s = "[";
+        for (int i = 0; i < n; i++) {
+            if (i) s += ", ";
+            s += fmtF(e.value.fArrayValue[i]);
+        }
+        if (e.count > 6) s += ", ...(" + std::to_string(e.count) + ")";
+        return s + "]";
+    }
+    if (e.type & xplmType_IntArray) {
+        int n = (std::min)(e.count, 6);
+        std::string s = "[";
+        for (int i = 0; i < n; i++) {
+            if (i) s += ", ";
+            s += std::to_string(e.value.iArrayValue[i]);
+        }
+        if (e.count > 6) s += ", ...(" + std::to_string(e.count) + ")";
+        return s + "]";
+    }
+    if (e.type & xplmType_Data) {
+        std::string s(e.value.cArrayValue);
+        if (s.size() > 40) s = s.substr(0, 40) + "...";
+        return "\"" + s + "\"";
+    }
+    if (e.type & xplmType_Float)  return fmtF(e.value.fValue);
+    if (e.type & xplmType_Int)    return std::to_string(e.value.iValue);
+    return {};
+}
+
+// ---------------------------------------------------------------------------
 // snapshot — for status page
 // ---------------------------------------------------------------------------
 std::vector<DataRefRegistry::SnapEntry> DataRefRegistry::snapshot() const
@@ -123,6 +181,7 @@ std::vector<DataRefRegistry::SnapEntry> DataRefRegistry::snapshot() const
     std::vector<SnapEntry> result;
     result.reserve(m_registry.size());
     for (const auto& [name, entry] : m_registry)
-        result.push_back({ name, entry.found, entry.type, entry.count });
+        result.push_back({ name, entry.attempted, entry.found, entry.type, entry.count,
+                           formatValueDisplay(entry) });
     return result;
 }
