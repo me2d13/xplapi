@@ -141,6 +141,8 @@
     <ClCompile Include="src\DataRefRegistry.cpp" />
     <ClCompile Include="src\WebServer.cpp" />
     <ClCompile Include="src\StaticFileServer.cpp" />
+    <ClCompile Include="src\WebSocket.cpp" />
+    <ClCompile Include="src\WebSocketManager.cpp" />
   </ItemGroup>
 
   <ItemGroup>
@@ -150,6 +152,8 @@
     <ClInclude Include="include\DataRefRegistry.h" />
     <ClInclude Include="include\WebServer.h" />
     <ClInclude Include="include\StaticFileServer.h" />
+    <ClInclude Include="include\WebSocket.h" />
+    <ClInclude Include="include\WebSocketManager.h" />
     <ClInclude Include="include\json.hpp" />
   </ItemGroup>
 

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>xplapi — WebSocket test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Consolas', 'Courier New', monospace; background: #0d1117; color: #c9d1d9; padding: 24px; line-height: 1.5; }
+    h1 { color: #58a6ff; font-size: 1.6em; margin-bottom: 4px; }
+    .subtitle { color: #8b949e; font-size: .9em; margin-bottom: 24px; }
+    .section { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+    .section label { display: block; color: #8b949e; font-size: .85em; margin-bottom: 6px; }
+    input, textarea {
+      width: 100%; background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+      color: #e6edf3; padding: 8px 12px; font-family: inherit; font-size: .9em;
+    }
+    textarea { min-height: 100px; resize: vertical; }
+    button {
+      background: #238636; color: #fff; border: 1px solid #2ea043; border-radius: 6px;
+      padding: 6px 16px; font-size: .9em; cursor: pointer; margin-top: 10px; margin-right: 8px;
+    }
+    button:hover { background: #2ea043; }
+    button.danger { background: #da3633; border-color: #f85149; }
+    button.danger:hover { background: #f85149; }
+    .status { padding: 8px; border-radius: 4px; margin-top: 12px; font-size: .9em; }
+    .status.connected { background: #0f2c18; border: 1px solid #238636; color: #3fb950; }
+    .status.disconnected { background: #2d1316; border: 1px solid #6e2020; color: #f85149; }
+    .output { background: #0d1117; border: 1px solid #30363d; border-radius: 4px; padding: 12px;
+              margin-top: 12px; font-size: .82em; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .nav { margin-bottom: 24px; display: flex; gap: 16px; flex-wrap: wrap; }
+    .nav a { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 5px 14px; font-size: .9em; }
+  </style>
+</head>
+<body>
+  <h1>xplapi</h1>
+  <p class="subtitle">WebSocket dataref streaming test</p>
+  <div class="nav">
+    <a href="/">Home</a>
+    <a href="/state">Status</a>
+    <a href="/api-test.html">API test</a>
+  </div>
+
+  <div class="section">
+    <label>Datarefs to watch (JSON array)</label>
+    <textarea id="datarefs" placeholder='["sim/time/total_running_time_sec", "sim/cockpit2/gauges/indicators/airspeed_kts_pilot"]'></textarea>
+    <label style="margin-top:12px">Interval (seconds)</label>
+    <input type="number" id="interval" value="1" min="1" max="60" style="width:80px"/>
+    <label style="margin-top:8px">
+      <input type="checkbox" id="alwaysUpdate"/> Always send (even when values unchanged)
+    </label>
+    <div style="margin-top:12px">
+      <button onclick="connect()">Connect</button>
+      <button class="danger" onclick="disconnect()">Disconnect</button>
+    </div>
+    <div id="status" class="status disconnected">Disconnected</div>
+    <div id="output" class="output" style="display:none"></div>
+  </div>
+
+  <script>
+    let ws = null;
+    const statusEl = document.getElementById('status');
+    const outputEl = document.getElementById('output');
+
+    function connect() {
+      if (ws && ws.readyState === WebSocket.OPEN) return;
+      const interval = document.getElementById('interval').value || 1;
+      const always = document.getElementById('alwaysUpdate').checked;
+      let url = 'ws://' + location.host + '/api/dataref/watch?interval=' + interval;
+      if (always) url += '&alwaysUpdate=true';
+      ws = new WebSocket(url);
+      ws.onopen = () => {
+        statusEl.textContent = 'Connected — send dataref list';
+        statusEl.className = 'status connected';
+        outputEl.style.display = 'block';
+        outputEl.textContent = '';
+        try {
+          const arr = JSON.parse(document.getElementById('datarefs').value || '[]');
+          ws.send(JSON.stringify(arr));
+        } catch (e) {
+          outputEl.textContent = 'Invalid JSON: ' + e.message;
+        }
+      };
+      ws.onmessage = (e) => {
+        try {
+          const j = JSON.parse(e.data);
+          outputEl.textContent = JSON.stringify(j, null, 2);
+        } catch (_) {
+          outputEl.textContent = e.data;
+        }
+      };
+      ws.onerror = () => { outputEl.textContent += '\n[WebSocket error]'; };
+      ws.onclose = () => {
+        statusEl.textContent = 'Disconnected';
+        statusEl.className = 'status disconnected';
+        ws = null;
+      };
+    }
+
+    function disconnect() {
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+    }
+  </script>
+</body>
+</html>

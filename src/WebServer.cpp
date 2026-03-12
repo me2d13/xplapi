@@ -10,6 +10,7 @@
 #include <vector>
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 
 using json = nlohmann::json;
 
@@ -528,20 +529,49 @@ std::string WebServer::handleStatusPage()
 // ============================================================================
 // Main dispatch — called by TcpListener on each incoming message
 // ============================================================================
-void WebServer::onMessageReceived(int clientSocket, const char* msg, int length)
+bool WebServer::onMessageReceived(int clientSocket, const char* msg, int length)
 {
+    // WebSocket: existing connection — handle frame
+    if (m_wsManager.hasConnection(clientSocket)) {
+        bool closed = m_wsManager.handleData(clientSocket, msg, length);
+        return closed;  // true = connection was closed
+    }
+
+    // WebSocket: upgrade request
+    if (length >= 20 && memcmp(msg, "GET ", 4) == 0) {
+        const char* p = (const char*)memchr(msg, ' ', length);
+        if (p && p - msg + 20 <= length && memcmp(p + 1, "/api/dataref/watch", 18) == 0) {
+            if (strstr(msg, "Upgrade: websocket") || strstr(msg, "Upgrade: WebSocket")) {
+                if (m_wsManager.tryUpgrade(clientSocket, msg, length))
+                    return false;  // keep connection open
+            }
+        }
+    }
+
+    // HTTP
     if (!m_registry) {
         sendHttp(clientSocket, 500, "text/plain", "registry not initialised");
         closesocket(clientSocket);
-        return;
+        return true;
     }
 
-    // Capture the first packet and socket locally, then spawn a detached thread
     std::string firstPacket(msg, length);
     std::thread([this, clientSocket, firstPacket]() {
         this->processRequest(clientSocket, firstPacket);
         closesocket(clientSocket);
     }).detach();
+    return true;
+}
+
+void WebServer::onClientDisconnected(int clientSocket)
+{
+    m_wsManager.removeConnection(clientSocket);
+}
+
+void WebServer::onLoopTick()
+{
+    for (int sock : m_wsManager.sendUpdates())
+        removeClientSocket(sock);
 }
 
 void WebServer::processRequest(int clientSocket, const std::string& msgStr)

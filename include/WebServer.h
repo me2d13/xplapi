@@ -2,6 +2,7 @@
 #include "TcpListener.h"
 #include "DataRefRegistry.h"
 #include "StaticFileServer.h"
+#include "WebSocketManager.h"
 #include <string>
 #include <thread>
 
@@ -18,17 +19,19 @@ class WebServer : public TcpListener {
 public:
     WebServer() = default;
 
-    void setRegistry(DataRefRegistry* reg) { m_registry = reg; }
+    void setRegistry(DataRefRegistry* reg) { m_registry = reg; m_wsManager.setRegistry(reg); }
     void setPluginDir(const std::string& dir) { m_staticServer.setPluginDir(dir); }
 
 protected:
-    void onMessageReceived(int clientSocket, const char* msg, int length) override;
+    bool onMessageReceived(int clientSocket, const char* msg, int length) override;
     void onClientConnected(int clientSocket) override    {}
-    void onClientDisconnected(int clientSocket) override {}
+    void onClientDisconnected(int clientSocket) override;
+    void onLoopTick() override;
 
 private:
     DataRefRegistry* m_registry { nullptr };
     StaticFileServer m_staticServer;
+    WebSocketManager m_wsManager;
 
     void processRequest(int clientSocket, const std::string& msgStr);
 

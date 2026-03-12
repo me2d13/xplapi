@@ -24,10 +24,13 @@ public:
 protected:
     virtual void onClientConnected(int clientSocket);
     virtual void onClientDisconnected(int clientSocket);
-    virtual void onMessageReceived(int clientSocket, const char* msg, int length);
+    // Return true to close connection (FD_CLR), false to keep open (WebSocket)
+    virtual bool onMessageReceived(int clientSocket, const char* msg, int length);
+    virtual void onLoopTick() {}
 
     void sendToClient(int clientSocket, const char* msg, int length);
     void broadcastToClients(int sendingClient, const char* msg, int length);
+    void removeClientSocket(int clientSocket);
 
 private:
     const char* m_ipAddress;

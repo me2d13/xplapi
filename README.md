@@ -11,7 +11,8 @@ Useful for driving external displays, tablet panels, scripts, and home-cockpit t
 - **Lazy dataref resolution** — just ask for a name; the plugin finds the handle automatically
 - **On-demand reads** — values are always fresh (updated every 100 ms by the flight loop)
 - **Status page** at `/state` — live view of every tracked dataref in the browser
-- **Static web server** — optional `www/` directory for custom pages (e.g. `api-test.html` to try APIs from the browser)
+- **Static web server** — optional `www/` directory for custom pages (e.g. `api-test.html`, `ws-test.html`)
+- **WebSocket streaming** — subscribe to dataref updates at a configurable interval
 - **CORS enabled** — call the API directly from any browser tab or web app
 - **Single config file** — optional `config.yaml` next to the `.xpl` file
 
@@ -110,6 +111,7 @@ Place HTML files in the `www/` directory next to the plugin (e.g. `plugins/xplap
 |------|--------------|
 | `index.html` | Served at `/` when present; otherwise `/` redirects to `/state` |
 | `api-test.html` | Interactive API test page — paste request bodies, execute each endpoint, view status code and response |
+| `ws-test.html` | WebSocket test page — connect, paste dataref names, view live streaming updates |
 
 ---
 
@@ -336,11 +338,32 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8012/api/command/end" -Con
 
 ---
 
-## Planned endpoints
+---
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `WS`   | `/api/dataref/watch` | WebSocket subscription — push updates at a configurable interval |
+### WebSocket: `WS /api/dataref/watch`
+
+Stream live dataref updates over WebSocket. Connect, send a JSON array of dataref names as the first message, then receive JSON snapshots at a configurable interval.
+
+**URL:** `ws://localhost:8012/api/dataref/watch`
+
+**Query parameters**
+
+| Parameter      | Type | Default | Description |
+|----------------|------|---------|-------------|
+| `interval`     | int  | 1       | Update interval in seconds (1–60) |
+| `alwaysUpdate` | bool | false   | Send every interval even when values unchanged |
+
+**First client message (required):** JSON array of dataref names, or `{"names": ["...", "..."]}`
+
+```json
+["sim/time/total_running_time_sec", "sim/cockpit2/gauges/indicators/airspeed_kts_pilot"]
+```
+
+**Server messages:** JSON object `{datarefName: value, ...}` for each requested dataref
+
+**Test page:** Open `http://localhost:8012/ws-test.html` to connect, paste datarefs, and view live updates.
+
+*Inspired by [msfs-web-api](https://github.com/me2d13/msfs-web-api) for Microsoft Flight Simulator.*
 
 ## Project structure
 
@@ -357,6 +380,7 @@ xplapi/
 ├── www/                    Static web files (optional)
 │   ├── index.html          Served at / if present
 │   ├── api-test.html       Interactive API test page
+│   ├── ws-test.html        WebSocket streaming test page
 │   └── *.html              Other pages (linked from status page)
 ├── include/
 │   ├── plugin.h            Plugin identity + platform macros
