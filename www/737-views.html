@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>737 Views — xplapi demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #1a1a1a; color: #e8f5bc; font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; }
+    .float-btn { position: absolute; z-index: 100; }
+    .btn-page {
+      background: rgba(173, 247, 98, 0.995); border: 2px solid #aaa; border-radius: 15px;
+      color: #242423; cursor: pointer; font-size: 16px; font-weight: 600; padding: 16px 24px;
+      min-height: 60px;
+    }
+    .btn-view {
+      background: rgba(200, 200, 200, 0.45); border: 2px solid #aaa; border-radius: 15px;
+      color: #e8f5bc; cursor: pointer; font-size: 16px; font-weight: 600; padding: 16px 24px;
+      min-height: 60px; transition: all 300ms;
+    }
+    .btn-view:hover { color: #1a1a1a; background: #fff; box-shadow: 0 8px 15px rgba(0,0,0,0.25); transform: translateY(-2px); }
+    .btn-view:active { box-shadow: none; transform: translateY(0); }
+    .img-center { display: block; margin: 0 auto; }
+    .view-frame { transform: scale(0.75); transform-origin: top left; }
+    .view-panel { position: relative; width: 800px; margin: 0 auto; }
+    .cockpit-placeholder { width: 800px; height: 450px; background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 100%); display: flex; align-items: center; justify-content: center; color: #666; font-size: 18px; }
+    #error-msg { display: none; position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #ff6b6b; color: white; padding: 20px 30px; border-radius: 10px; z-index: 1000; max-width: 600px; text-align: center; font-weight: bold; }
+    .nav-link { position: absolute; top: 10px; left: 100px; z-index: 101; color: #58a6ff; text-decoration: none; font-size: 14px; }
+    .nav-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <a class="nav-link" href="/state">Status</a>
+  <button id="btnIn" class="float-btn btn-page" style="top: 10px; left: 10px;">IN</button>
+  <button id="btnOut" class="float-btn btn-page" style="top: 10px; right: 10px;">OUT</button>
+
+  <div id="inFrame" class="view-frame">
+    <div class="view-panel" id="internalViews">
+      <img class="img-center" id="cockpitImg" src="737-views/cockpit-m.jpg" alt="Cockpit" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="cockpit-placeholder" id="cockpitPlaceholder" style="display: none;">Cockpit — copy cockpit-m.jpg to www/737-views/ from fs-web-panels</div>
+    </div>
+  </div>
+  <div id="outFrame" class="view-frame" style="display: none; padding-top: 50px;">
+    <div class="view-panel" id="outViews" style="padding-top: 50px;">
+      <img class="img-center" src="737-views/plane-4002.svg" width="600" alt="737" />
+    </div>
+  </div>
+
+  <div id="error-msg"></div>
+
+  <script>
+    // Use same origin when served from xplapi (localhost:8012)
+    const API = location.origin;
+
+    const inButtons = [
+      { style: 'top: 5px; left: 50%; transform: translate(-50%, 0);', text: 'After overhead' },
+      { style: 'top: 90px; left: 50%; transform: translate(-50%, 0);', text: 'Overhead' },
+      { style: 'top: 220px; left: 40%; transform: translate(-50%, 0);', text: 'Pilot' },
+      { style: 'top: 220px; left: 60%; transform: translate(-50%, 0);', text: 'Copilot' },
+      { style: 'top: 250px; left: 5%;', text: 'Left' },
+      { style: 'top: 250px; right: 5%;', text: 'Right' },
+      { style: 'top: 350px; left: 2%;', text: 'Tablet' },
+      { style: 'top: 320px; right: 48%', text: 'Cockpit' },
+      { style: 'top: 420px; right: 50%', text: 'FMC' },
+      { style: 'bottom: 50px; left: 50%; transform: translate(-50%, 0);', text: 'Pedestal' },
+      { style: 'bottom: 5px; left: 5px;', text: 'Fly by' },
+      { style: 'bottom: 5px; right: 5px;', text: 'Chase' },
+    ];
+
+    const outButtons = [
+      { style: 'top: -20px; left: 50%; transform: translate(-50%, 0);', text: 'Front' },
+      { style: 'top: 250px; left: 5%;', text: 'From left' },
+      { style: 'top: 250px; right: 7%;', text: 'From right' },
+      { style: 'top: 0px; left: 20%;', text: 'Fly by' },
+      { style: 'bottom: 0px; left: 50%; transform: translate(-50%, 0);', text: 'Back' },
+      { style: 'bottom: 28%; left: 55%;', text: 'Gear' },
+    ];
+
+    const viewCoordinates = [
+      { name: 'After overhead', datarefs: {
+  "sim/graphics/view/pilots_head_x": 0.02318529039621353,
+  "sim/graphics/view/pilots_head_y": 1.302847981452942,
+  "sim/graphics/view/pilots_head_z": -15.205652236938477,
+  "sim/graphics/view/pilots_head_psi": 359.8594055175781,
+  "sim/graphics/view/pilots_head_the": 69.875,
+  "sim/graphics/view/pilots_head_phi": 0.00003344981814734638
+} },
+      { name: 'Overhead', datarefs: {
+  "sim/graphics/view/pilots_head_x": 0.02279968373477459,
+  "sim/graphics/view/pilots_head_y": 0.8177000880241394,
+  "sim/graphics/view/pilots_head_z": -15.65638256072998,
+  "sim/graphics/view/pilots_head_psi": 359.8594055175781,
+  "sim/graphics/view/pilots_head_the": 69.875,
+  "sim/graphics/view/pilots_head_phi": 0.00003344981814734638
+} },
+      { name: 'Pilot', datarefs: {
+  "sim/graphics/view/pilots_head_x": -0.515112042427063,
+  "sim/graphics/view/pilots_head_y": 1.3258800506591797,
+  "sim/graphics/view/pilots_head_z": -15.639287948608398,
+  "sim/graphics/view/pilots_head_psi": 0.00003563112113624811,
+  "sim/graphics/view/pilots_head_the": -8.583335876464844,
+  "sim/graphics/view/pilots_head_phi": -2.3435360639936786e-13
+} },
+      { name: 'Copilot', datarefs: {
+  "sim/graphics/view/pilots_head_x": 0.3130722939968109,
+  "sim/graphics/view/pilots_head_y": 1.3258800506591797,
+  "sim/graphics/view/pilots_head_z": -15.639287948608398,
+  "sim/graphics/view/pilots_head_psi": 0,
+  "sim/graphics/view/pilots_head_the": 0,
+  "sim/graphics/view/pilots_head_phi": 0
+} },
+      { name: 'Left', datarefs: {
+  "sim/graphics/view/pilots_head_x": -0.4740515947341919,
+  "sim/graphics/view/pilots_head_y": 1.3258800506591797,
+  "sim/graphics/view/pilots_head_z": -15.743273735046387,
+  "sim/graphics/view/pilots_head_psi": 291.5156555175781,
+  "sim/graphics/view/pilots_head_the": -7.125000476837158,
+  "sim/graphics/view/pilots_head_phi": -0.0000040451454879075754
+} },
+      { name: 'Right', datarefs: {
+  "sim/graphics/view/pilots_head_x": 0.3745386600494385,
+  "sim/graphics/view/pilots_head_y": 1.3098682165145874,
+  "sim/graphics/view/pilots_head_z": -15.873403549194336,
+  "sim/graphics/view/pilots_head_psi": 75.65625,
+  "sim/graphics/view/pilots_head_the": -6.125000476837158,
+  "sim/graphics/view/pilots_head_phi": -3.5574200296650815e-7
+} },
+      { name: 'Tablet', datarefs:  {
+  "sim/graphics/view/pilots_head_x": -0.5105381011962891,
+  "sim/graphics/view/pilots_head_y": 1.2752043008804321,
+  "sim/graphics/view/pilots_head_z": -15.851642608642578,
+  "sim/graphics/view/pilots_head_psi": 304.4531555175781,
+  "sim/graphics/view/pilots_head_the": -30.0000057220459,
+  "sim/graphics/view/pilots_head_phi": -0.00001659161353018135
+} },
+      { name: 'Cockpit', datarefs: {
+  "sim/graphics/view/pilots_head_x": -0.515112042427063,
+  "sim/graphics/view/pilots_head_y": 1.3258800506591797,
+  "sim/graphics/view/pilots_head_z": -15.639287948608398,
+  "sim/graphics/view/pilots_head_psi": 24.468751907348633,
+  "sim/graphics/view/pilots_head_the": -29.000003814697266,
+  "sim/graphics/view/pilots_head_phi": -5.227781230132678e-7
+} },
+      { name: 'FMC', datarefs: {
+  "sim/graphics/view/pilots_head_x": -0.15349489450454712,
+  "sim/graphics/view/pilots_head_y": 1.0929548740386963,
+  "sim/graphics/view/pilots_head_z": -16.131914138793945,
+  "sim/graphics/view/pilots_head_psi": 0.4218750298023224,
+  "sim/graphics/view/pilots_head_the": -49.625003814697266,
+  "sim/graphics/view/pilots_head_phi": -1.4163516581788826e-8
+} },
+      { name: 'Pedestal', datarefs: {
+  "sim/graphics/view/pilots_head_x": -0.0013245363952592015,
+  "sim/graphics/view/pilots_head_y": 1.1256152391433716,
+  "sim/graphics/view/pilots_head_z": -15.678154945373535,
+  "sim/graphics/view/pilots_head_psi": 180.28126525878906,
+  "sim/graphics/view/pilots_head_the": -89.99998474121094,
+  "sim/graphics/view/pilots_head_phi": 179.99996948242188
+} },
+      { name: 'Front', datarefs: {
+  "sim/graphics/view/pilots_head_x": 0,
+  "sim/graphics/view/pilots_head_y": 2,
+  "sim/graphics/view/pilots_head_z": -50,
+  "sim/graphics/view/pilots_head_psi": 180,
+  "sim/graphics/view/pilots_head_the": 0,
+  "sim/graphics/view/pilots_head_phi": 0
+} },
+      { name: 'From left', datarefs: {
+  "sim/graphics/view/pilots_head_x": -40,
+  "sim/graphics/view/pilots_head_y": 2,
+  "sim/graphics/view/pilots_head_z": 0,
+  "sim/graphics/view/pilots_head_psi": 90,
+  "sim/graphics/view/pilots_head_the": 0,
+  "sim/graphics/view/pilots_head_phi": 0
+} },
+      { name: 'From right', datarefs: {
+  "sim/graphics/view/pilots_head_x": 40,
+  "sim/graphics/view/pilots_head_y": 2,
+  "sim/graphics/view/pilots_head_z": 0,
+  "sim/graphics/view/pilots_head_psi": 270,
+  "sim/graphics/view/pilots_head_the": 0,
+  "sim/graphics/view/pilots_head_phi": 0
+} },
+      { name: 'Back', datarefs: {
+  "sim/graphics/view/pilots_head_x": 0,
+  "sim/graphics/view/pilots_head_y": 2,
+  "sim/graphics/view/pilots_head_z": 50,
+  "sim/graphics/view/pilots_head_psi": 0,
+  "sim/graphics/view/pilots_head_the": 0,
+  "sim/graphics/view/pilots_head_phi": 0
+} },
+      { name: 'Gear', datarefs: { 'sim/graphics/view/pilots_head_x': 3.1579, 'sim/graphics/view/pilots_head_y': -2.6286, 'sim/graphics/view/pilots_head_z': 12.968, 'sim/graphics/view/pilots_head_psi': 352, 'sim/graphics/view/pilots_head_the': -2, 'sim/graphics/view/pilots_head_phi': 0 } },
+      { name: 'Fly by', command: 'sim/view/still_spot' },
+      { name: 'Chase', command: 'sim/view/chase' },
+    ];
+
+    async function setDatarefs(datarefs) {
+      const r = await fetch(API + '/api/dataref/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(datarefs),
+      });
+      if (!r.ok) throw new Error('setMultiple failed: ' + r.status);
+    }
+
+    async function executeCommand(name) {
+      const r = await fetch(API + '/api/command/once', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!r.ok) throw new Error('command failed: ' + r.status);
+    }
+
+    async function onButtonClick(text) {
+      const v = viewCoordinates.find(vc => vc.name === text);
+      if (!v) return;
+      try {
+        if (v.datarefs) await setDatarefs(v.datarefs);
+        else if (v.command) await executeCommand(v.command);
+      } catch (e) {
+        showError(e.message);
+      }
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = msg;
+      el.style.display = 'block';
+      setTimeout(() => el.style.display = 'none', 5000);
+    }
+
+    function addButtons() {
+      const inNames = inButtons.map(b => b.text);
+      const outNames = outButtons.map(b => b.text);
+      const inDiv = document.getElementById('internalViews');
+      const outDiv = document.getElementById('outViews');
+      inButtons.forEach(b => {
+        const btn = document.createElement('button');
+        btn.style.cssText = (b.style.endsWith(';') ? b.style : b.style + ';') + ' position: absolute;';
+        btn.innerText = b.text;
+        btn.className = 'btn-view float-btn';
+        btn.onclick = () => onButtonClick(b.text);
+        inDiv.appendChild(btn);
+      });
+      outButtons.forEach(b => {
+        const btn = document.createElement('button');
+        btn.style.cssText = (b.style.endsWith(';') ? b.style : b.style + ';') + ' position: absolute;';
+        btn.innerText = b.text;
+        btn.className = 'btn-view float-btn';
+        btn.onclick = () => onButtonClick(b.text);
+        outDiv.appendChild(btn);
+      });
+      document.getElementById('btnIn').onclick = () => {
+        document.getElementById('inFrame').style.display = 'block';
+        document.getElementById('outFrame').style.display = 'none';
+      };
+      document.getElementById('btnOut').onclick = () => {
+        document.getElementById('inFrame').style.display = 'none';
+        document.getElementById('outFrame').style.display = 'block';
+      };
+    }
+
+    addButtons();
+  </script>
+</body>
+</html>

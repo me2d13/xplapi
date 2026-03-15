@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>xplapi — View helper</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Consolas', 'Courier New', monospace; background: #0d1117; color: #c9d1d9; padding: 24px; line-height: 1.5; }
+    h1 { color: #58a6ff; font-size: 1.6em; margin-bottom: 4px; }
+    .subtitle { color: #8b949e; font-size: .9em; margin-bottom: 24px; }
+    .section { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+    .section h2 { color: #79c0ff; font-size: 1em; margin-bottom: 12px; text-transform: uppercase; letter-spacing: .1em; }
+    button {
+      background: #238636; color: #fff; border: 1px solid #2ea043; border-radius: 6px;
+      padding: 6px 16px; font-size: .9em; cursor: pointer; margin-right: 8px; margin-bottom: 8px;
+    }
+    button:hover { background: #2ea043; }
+    button.danger { background: #da3633; border-color: #f85149; }
+    button.danger:hover { background: #f85149; }
+    .status { padding: 8px; border-radius: 4px; margin-bottom: 12px; font-size: .9em; }
+    .status.connected { background: #0f2c18; border: 1px solid #238636; color: #3fb950; }
+    .status.disconnected { background: #2d1316; border: 1px solid #6e2020; color: #f85149; }
+    table { width: 100%; border-collapse: collapse; font-size: .9em; }
+    th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #21262d; }
+    th { color: #6e7681; font-weight: normal; }
+    .dr-name { color: #79c0ff; font-size: .85em; }
+    .dr-val { color: #3fb950; font-family: monospace; }
+    .json-box { background: #0d1117; border: 1px solid #30363d; border-radius: 4px; padding: 12px;
+                font-size: .85em; white-space: pre-wrap; word-break: break-all; margin-top: 8px;
+                font-family: inherit; min-height: 120px; }
+    textarea.json-box { width: 100%; resize: vertical; color: #e6edf3; }
+    .copy-btn { margin-top: 8px; }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .nav { margin-bottom: 24px; display: flex; gap: 16px; flex-wrap: wrap; }
+    .nav a { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 5px 14px; font-size: .9em; }
+  </style>
+</head>
+<body>
+  <h1>xplapi</h1>
+  <p class="subtitle">View helper — tune and create custom view presets</p>
+  <div class="nav">
+    <a href="/">Home</a>
+    <a href="/state">Status</a>
+    <a href="/737-views.html">737 Views</a>
+  </div>
+
+  <div class="section">
+    <h2>Live values</h2>
+    <p style="color:#8b949e;font-size:.85em;margin-bottom:12px">Move your view in X-Plane — values update via WebSocket.</p>
+    <div id="status" class="status disconnected">Disconnected</div>
+    <button onclick="connect()">Connect</button>
+    <button class="danger" onclick="disconnect()">Disconnect</button>
+    <table id="valuesTable" style="margin-top:16px">
+      <thead><tr><th>Dataref</th><th>Value</th></tr></thead>
+      <tbody id="valuesBody"></tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>JSON for write</h2>
+    <p style="color:#8b949e;font-size:.85em;margin-bottom:8px">Copy this into your view config (request body for POST /api/dataref/write).</p>
+    <div id="jsonBox" class="json-box">{}</div>
+    <button class="copy-btn" onclick="copyJson()">Copy to clipboard</button>
+  </div>
+
+  <div class="section">
+    <h2>Apply to X-Plane</h2>
+    <p style="color:#8b949e;font-size:.85em;margin-bottom:8px">Paste or edit JSON, then send to apply view values without leaving this page.</p>
+    <textarea id="editJson" class="json-box" placeholder='{"sim/graphics/view/pilots_head_psi": -45.0, ...}'></textarea>
+    <div style="margin-top:8px">
+      <button onclick="loadFromLive()">Load from live values</button>
+      <button onclick="sendToXPlane()">Send to X-Plane</button>
+    </div>
+    <div id="sendStatus" class="status" style="display:none;margin-top:12px"></div>
+  </div>
+
+  <script>
+    const VIEW_DATAREFS = [
+      'sim/graphics/view/pilots_head_x',
+      'sim/graphics/view/pilots_head_y',
+      'sim/graphics/view/pilots_head_z',
+      'sim/graphics/view/pilots_head_psi',
+      'sim/graphics/view/pilots_head_the',
+      'sim/graphics/view/pilots_head_phi',
+    ];
+
+    let ws = null;
+    const statusEl = document.getElementById('status');
+    const valuesBody = document.getElementById('valuesBody');
+    const jsonBox = document.getElementById('jsonBox');
+
+    function connect() {
+      if (ws && ws.readyState === WebSocket.OPEN) return;
+      const url = 'ws://' + location.host + '/api/dataref/watch?interval=1&alwaysUpdate=true';
+      ws = new WebSocket(url);
+      ws.onopen = () => {
+        statusEl.textContent = 'Connected — streaming view datarefs';
+        statusEl.className = 'status connected';
+        ws.send(JSON.stringify(VIEW_DATAREFS));
+      };
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          updateDisplay(data);
+        } catch (_) {}
+      };
+      ws.onerror = () => {};
+      ws.onclose = () => {
+        statusEl.textContent = 'Disconnected';
+        statusEl.className = 'status disconnected';
+        ws = null;
+      };
+    }
+
+    function disconnect() {
+      if (ws) { ws.close(); ws = null; }
+    }
+
+    function updateDisplay(data) {
+      const obj = {};
+      valuesBody.innerHTML = '';
+      for (const name of VIEW_DATAREFS) {
+        const val = data[name];
+        const display = val != null ? String(val) : '—';
+        obj[name] = val;
+        const row = document.createElement('tr');
+        row.innerHTML = '<td class="dr-name">' + name + '</td><td class="dr-val">' + display + '</td>';
+        valuesBody.appendChild(row);
+      }
+      jsonBox.textContent = JSON.stringify(obj, null, 2);
+    }
+
+    function copyJson() {
+      navigator.clipboard.writeText(jsonBox.textContent).then(() => {
+        const btn = document.querySelector('.copy-btn');
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = orig, 1500);
+      });
+    }
+
+    function loadFromLive() {
+      document.getElementById('editJson').value = jsonBox.textContent;
+    }
+
+    async function sendToXPlane() {
+      const editEl = document.getElementById('editJson');
+      const statusEl = document.getElementById('sendStatus');
+      let body;
+      try {
+        body = editEl.value.trim() || '{}';
+        JSON.parse(body);
+      } catch (e) {
+        statusEl.style.display = 'block';
+        statusEl.className = 'status disconnected';
+        statusEl.textContent = 'Invalid JSON: ' + e.message;
+        return;
+      }
+      try {
+        const r = await fetch('/api/dataref/write', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: body
+        });
+        const text = await r.text();
+        statusEl.style.display = 'block';
+        if (r.ok) {
+          statusEl.className = 'status connected';
+          statusEl.textContent = 'Sent successfully (' + r.status + ')';
+        } else {
+          statusEl.className = 'status disconnected';
+          try {
+            const err = JSON.parse(text);
+            statusEl.textContent = (err.error || text) + ' (' + r.status + ')';
+          } catch (_) {
+            statusEl.textContent = text || 'Error ' + r.status;
+          }
+        }
+      } catch (e) {
+        statusEl.style.display = 'block';
+        statusEl.className = 'status disconnected';
+        statusEl.textContent = 'Error: ' + e.message;
+      }
+    }
+
+    updateDisplay({});
+  </script>
+</body>
+</html>

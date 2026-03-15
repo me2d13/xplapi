@@ -3,6 +3,21 @@
 An X-Plane 12 plugin that exposes a **REST HTTP API** for reading (and eventually writing) datarefs and executing commands.  
 Useful for driving external displays, tablet panels, scripts, and home-cockpit tools without wrestling with UDP broadcast or SimConnect.
 
+I know X-plane already has built-in web API and I tried to use it for some time. But I was not happy with that because
+- it's quite difficult to use, you need to lookup object first, then use its id
+- sometimes I was getting huge delays in response - tens of seconds or even over minute
+- it can be called only from localhost (the PC with X-plane) so it's not usable e.g. for tablets on the same network - with some reverse proxy hacks
+
+This plugin is addressing those issues - can work with datarefs names directly and can be called from other hosts in the network. It has also small built-in web server so you can directly host pages with web panels. Included example contains small page as views switcher for Zibo 737. But you can create web pages for anything - radio panels, autopilots, light panels or even some indicators (using web sockets).
+
+Of course the API is not only for web pages, you can call it with curl or other projects.
+
+So far it's built for Windows only (that's my setup), but feel free to create PR with Linux/Mac build tuning and I can add other platforms.
+
+### Example - 737 views switcher
+
+![737 view switcher](img/737views.png)
+
 ---
 
 ## Features
@@ -112,6 +127,8 @@ Place HTML files in the `www/` directory next to the plugin (e.g. `plugins/xplap
 | `index.html` | Served at `/` when present; otherwise `/` redirects to `/state` |
 | `api-test.html` | Interactive API test page — paste request bodies, execute each endpoint, view status code and response |
 | `ws-test.html` | WebSocket test page — connect, paste dataref names, view live streaming updates |
+| `737-views.html` | Zibo 737 cockpit/external view switcher — predefined views over cockpit/plane images. Copy `cockpit-m.jpg` from [fs-web-panels](https://github.com/me2d13/fs-web-panels) to `www/737-views/` for the inner view background. |
+| `view-helper.html` | View tuning tool — WebSocket streams the 6 view datarefs, shows live values and copy-pasteable JSON for POST /api/dataref/write |
 
 ---
 
@@ -128,39 +145,17 @@ Read a single dataref by name.
 **Response — resolved value**
 ```json
 {
-  "name": "sim/time/total_running_time_sec",
-  "type": "float",
-  "value": 1523.47
+  "sim/time/total_running_time_sec": 1523.47
 }
 ```
 
-**Response — first request (not yet resolved)**
+**Response — first request (not yet resolved) or dataref not found**
 ```json
 {
-  "name": "sim/time/total_running_time_sec",
-  "status": "pending"
+  "sim/time/total_running_time_sec": null
 }
 ```
-Retry after ~100 ms. The flight loop resolves the handle on the next tick.
-
-**Response — dataref not found in X-Plane**
-```json
-{
-  "name": "sim/does/not/exist",
-  "error": "dataref not found"
-}
-```
-
-**Value types**
-
-| `type`     | `value` shape            | Notes |
-|------------|--------------------------|-------|
-| `int`      | `42`                     | |
-| `float`    | `3.14`                   | |
-| `double`   | `3.141592653589793`      | |
-| `int[]`    | `[0, 1, 2, ...]`         | Full array |
-| `float[]`  | `[0.1, 0.2, ...]`        | Full array |
-| `bytes`    | `"KSFO"`                 | Byte array returned as string |
+Retry after ~100 ms if the dataref exists but is still resolving. The flight loop resolves the handle on the next tick.
 
 **curl example**
 ```bash
@@ -174,31 +169,11 @@ curl "http://localhost:8012/api/dataref?name=sim/cockpit2/gauges/indicators/airs
 
 ---
 
-### `POST /api/dataref/get`
+### `POST /api/dataref/read`
 
-Read a single dataref. Equivalent to the GET variant but the name is passed in a JSON body — handy when calling from code.
+Read one or more datarefs. Accepts a JSON array of names or a single name string.
 
-**Request body**
-```json
-{
-  "name": "sim/time/total_running_time_sec"
-}
-```
-
-**curl example**
-```bash
-curl -X POST http://localhost:8012/api/dataref/get \
-     -H "Content-Type: application/json" \
-     -d '{"name": "sim/time/total_running_time_sec"}'
-```
-
----
-
-### `POST /api/dataref/getMultiple`
-
-Read several datarefs in a single round-trip. Accepts either a bare JSON array or an object with a `names` key.
-
-**Request body — bare array (preferred)**
+**Request body — array**
 ```json
 [
   "sim/time/total_running_time_sec",
@@ -207,79 +182,52 @@ Read several datarefs in a single round-trip. Accepts either a bare JSON array o
 ]
 ```
 
-**Request body — object form**
+**Request body — single name**
 ```json
-{
-  "names": [
-    "sim/time/total_running_time_sec",
-    "sim/cockpit2/gauges/indicators/airspeed_kts_pilot"
-  ]
-}
+"sim/time/total_running_time_sec"
 ```
 
-**Response** — array, one entry per requested name (same shape as single-get):
+**Response** — object with dataref names as keys and values (or `null` for pending/not found):
 ```json
-[
-  {
-    "name": "sim/time/total_running_time_sec",
-    "type": "float",
-    "value": 1523.47
-  },
-  {
-    "name": "sim/cockpit2/gauges/indicators/airspeed_kts_pilot",
-    "type": "float",
-    "value": 142.3
-  },
-  {
-    "name": "sim/flightmodel/position/indicated_airspeed",
-    "status": "pending"
-  }
-]
+{
+  "sim/time/total_running_time_sec": 1523.47,
+  "sim/cockpit2/gauges/indicators/airspeed_kts_pilot": 142.3,
+  "sim/flightmodel/position/indicated_airspeed": null
+}
 ```
 
 **curl example**
 ```bash
-curl -X POST http://localhost:8012/api/dataref/getMultiple \
+curl -X POST http://localhost:8012/api/dataref/read \
      -H "Content-Type: application/json" \
      -d '["sim/time/total_running_time_sec", "sim/cockpit2/gauges/indicators/airspeed_kts_pilot"]'
 ```
 
 ---
 
-### `POST /api/dataref/set`
+### `POST /api/dataref/write`
 
-Write a value to a dataref. Returns the state of the dataref after the write.
+Write one or more datarefs. Request body is a JSON object with dataref names as keys and values.
 
 **Request body**
 ```json
 {
-  "name": "sim/graphics/view/pilots_head_psi",
-  "value": 45.0
+  "sim/graphics/view/pilots_head_psi": -45.0,
+  "sim/graphics/view/pilots_head_the": -15.0
+}
+```
+
+**Response** — same object with values after the write (or `null` for datarefs that could not be written):
+```json
+{
+  "sim/graphics/view/pilots_head_psi": -45.0,
+  "sim/graphics/view/pilots_head_the": -15.0
 }
 ```
 
 **PowerShell example**
 ```powershell
-Invoke-RestMethod -Method Post -Uri "http://localhost:8012/api/dataref/set" -ContentType "application/json" -Body '{"name":"sim/graphics/view/pilots_head_psi", "value":45.0}'
-```
-
----
-
-### `POST /api/dataref/setMultiple`
-
-Write multiple values in one request.
-
-**Request body**
-```json
-[
-  { "name": "sim/graphics/view/pilots_head_psi", "value": -45.0 },
-  { "name": "sim/graphics/view/pilots_head_the", "value": -15.0 }
-]
-```
-
-**PowerShell example**
-```powershell
-Invoke-RestMethod -Method Post -Uri "http://localhost:8012/api/dataref/setMultiple" -ContentType "application/json" -Body '[{"name":"sim/graphics/view/pilots_head_psi", "value":-45.0}, {"name":"sim/graphics/view/pilots_head_the", "value":-15.0}]'
+Invoke-RestMethod -Method Post -Uri "http://localhost:8012/api/dataref/write" -ContentType "application/json" -Body '{"sim/graphics/view/pilots_head_psi":-45.0, "sim/graphics/view/pilots_head_the":-15.0}'
 ```
 
 ---
@@ -287,7 +235,7 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8012/api/dataref/setMultip
 ## Typical usage pattern
 
 On first contact the plugin needs one flight-loop tick (~100 ms) to resolve a new dataref name.  
-A robust client should handle the `"pending"` response with a simple retry:
+A robust client should handle `null` values with a simple retry:
 
 ```python
 import requests, time
@@ -298,13 +246,13 @@ def read_dataref(name: str, retries: int = 5) -> dict:
     for _ in range(retries):
         r = requests.get(f"{BASE}/api/dataref", params={"name": name})
         data = r.json()
-        if data.get("status") != "pending":
-            return data
+        if data.get(name) is not None:
+            return data[name]
         time.sleep(0.15)
-    return data
+    return data.get(name)
 
 print(read_dataref("sim/time/total_running_time_sec"))
-# {'name': 'sim/time/total_running_time_sec', 'type': 'float', 'value': 1523.47}
+# 1523.47
 ```
 
 ---
@@ -381,6 +329,7 @@ xplapi/
 │   ├── index.html          Served at / if present
 │   ├── api-test.html       Interactive API test page
 │   ├── ws-test.html        WebSocket streaming test page
+│   ├── view-helper.html    View tuning — live datarefs + JSON for setMultiple
 │   └── *.html              Other pages (linked from status page)
 ├── include/
 │   ├── plugin.h            Plugin identity + platform macros

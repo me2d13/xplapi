@@ -38,10 +38,8 @@ private:
     // Route handlers – return response body; set contentType and statusCode
     std::string handleStatusPage();
     std::string handleGetOne(const std::string& name, int& statusCode);
-    std::string handleGetOneBody(const std::string& body, int& statusCode);
-    std::string handleGetMultiple(const std::string& body, int& statusCode);
-    std::string handleSet(const std::string& body, int& statusCode);
-    std::string handleSetMultiple(const std::string& body, int& statusCode);
+    std::string handleRead(const std::string& body, int& statusCode);
+    std::string handleWrite(const std::string& body, int& statusCode);
     std::string handleCommand(const std::string& path, const std::string& body, int& statusCode);
 
     // Helpers

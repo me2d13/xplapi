@@ -106,7 +106,30 @@ std::string WebServer::queryParam(const std::string& query, const std::string& k
     return {};
 }
 
-// Convert a DataRefEntry + name to a JSON value  {"name":..., "type":..., "value":...}
+// Convert DataRefEntry to JSON value only (for simplified {name: value} API)
+static json entryToValue(const DataRefEntry& e)
+{
+    if (!e.found) return nullptr;
+    if (e.type & xplmType_FloatArray) {
+        int n = e.count < 64 ? e.count : 64;
+        json arr = json::array();
+        for (int i = 0; i < n; i++) arr.push_back(e.value.fArrayValue[i]);
+        return arr;
+    }
+    if (e.type & xplmType_IntArray) {
+        int n = e.count < 64 ? e.count : 64;
+        json arr = json::array();
+        for (int i = 0; i < n; i++) arr.push_back(e.value.iArrayValue[i]);
+        return arr;
+    }
+    if (e.type & xplmType_Data) return std::string(e.value.cArrayValue);
+    if (e.type & xplmType_Double) return (double)e.value.fValue;
+    if (e.type & xplmType_Float) return e.value.fValue;
+    if (e.type & xplmType_Int) return e.value.iValue;
+    return nullptr;
+}
+
+// Convert a DataRefEntry + name to full JSON  {"name":..., "type":..., "value":...} (for status page)
 static json entryToJson(const std::string& name, const DataRefEntry& e)
 {
     json j;
@@ -191,7 +214,7 @@ void WebServer::sendRedirect(int sock, const std::string& location)
 // Route handlers
 // ============================================================================
 
-// GET /api/dataref?name=<encoded-name>
+// GET /api/dataref?name=<encoded-name>  → {name: value}
 std::string WebServer::handleGetOne(const std::string& name, int& statusCode)
 {
     if (name.empty()) {
@@ -199,65 +222,49 @@ std::string WebServer::handleGetOne(const std::string& name, int& statusCode)
         return json{{"error", "missing 'name' query parameter"}}.dump(2);
     }
 
-    // Ensure the registry knows about this name
     m_registry->ensureTracked(name);
-
     DataRefEntry entry;
     m_registry->readValue(name, entry);
 
     if (!entry.attempted) {
-        // First time seeing this! Wait for up to 200ms for the flight loop to update.
         m_registry->waitForUpdate(200);
-        // Try reading again after the wait
         m_registry->readValue(name, entry);
     }
 
+    json result;
     if (!entry.attempted) {
-        // Still not resolved (maybe XP flight loop is paused or very slow)
-        statusCode = 200;
-        return json{{"name", name}, {"status", "pending"}}.dump(2);
+        result[name] = nullptr;  // pending
+    } else if (!entry.found) {
+        result[name] = nullptr;  // not found
+    } else {
+        result[name] = entryToValue(entry);
     }
-
     statusCode = 200;
-    return entryToJson(name, entry).dump(2);
+    return result.dump(2);
 }
 
-// POST /api/dataref/get    body: {"name": "sim/cockpit/..."}
-std::string WebServer::handleGetOneBody(const std::string& body, int& statusCode)
+// POST /api/dataref/read   body: ["name1", "name2"]  → {"name1": value1, "name2": value2}
+std::string WebServer::handleRead(const std::string& body, int& statusCode)
 {
     try {
         auto j = json::parse(body);
-        std::string name = j.value("name", std::string{});
-        return handleGetOne(name, statusCode);
-    } catch (const json::exception& e) {
-        statusCode = 400;
-        return json{{"error", std::string("invalid JSON: ") + e.what()}}.dump(2);
-    }
-}
-
-// POST /api/dataref/getMultiple    body: ["sim/...", "sim/..."]
-//   OR body: {"names": ["sim/...", "sim/..."]}
-std::string WebServer::handleGetMultiple(const std::string& body, int& statusCode)
-{
-    try {
-        auto j = json::parse(body);
-
-        // Accept both a bare array and {"names": [...]}
-        json names;
+        std::vector<std::string> names;
         if (j.is_array()) {
-            names = j;
-        } else if (j.is_object() && j.contains("names")) {
-            names = j["names"];
+            for (const auto& v : j) if (v.is_string()) names.push_back(v.get<std::string>());
+        } else if (j.is_string()) {
+            names.push_back(j.get<std::string>());
         } else {
             statusCode = 400;
-            return json{{"error", "body must be a JSON array or {\"names\":[...]}"}}.dump(2);
+            return json{{"error", "body must be a JSON array of names or a single name string"}}.dump(2);
+        }
+
+        if (names.empty()) {
+            statusCode = 400;
+            return json{{"error", "empty names list"}}.dump(2);
         }
 
         bool anyNew = false;
-        for (const auto& nameVal : names) {
-            if (!nameVal.is_string()) continue;
-            std::string name = nameVal.get<std::string>();
-            
+        for (const auto& name : names) {
             DataRefEntry entry;
             m_registry->readValue(name, entry);
             if (!entry.attempted) {
@@ -265,26 +272,17 @@ std::string WebServer::handleGetMultiple(const std::string& body, int& statusCod
                 anyNew = true;
             }
         }
+        if (anyNew) m_registry->waitForUpdate(200);
 
-        if (anyNew) {
-            m_registry->waitForUpdate(200);
-        }
-
-        json result = json::array();
-        for (const auto& nameVal : names) {
-            if (!nameVal.is_string()) continue;
-            std::string name = nameVal.get<std::string>();
-
+        json result;
+        for (const auto& name : names) {
             DataRefEntry entry;
-            if (m_registry->readValue(name, entry)) {
-                result.push_back(entryToJson(name, entry));
-            } else if (!entry.attempted) {
-                result.push_back(json{{"name", name}, {"status", "pending"}});
-            } else {
-                result.push_back(entryToJson(name, entry)); // Error object
-            }
+            m_registry->readValue(name, entry);
+            if (!entry.attempted || !entry.found)
+                result[name] = nullptr;
+            else
+                result[name] = entryToValue(entry);
         }
-
         statusCode = 200;
         return result.dump(2);
 
@@ -294,61 +292,39 @@ std::string WebServer::handleGetMultiple(const std::string& body, int& statusCod
     }
 }
 
-// POST /api/dataref/set    body: {"name": "sim/...", "value": 123}
-std::string WebServer::handleSet(const std::string& body, int& statusCode)
+// POST /api/dataref/write   body: {"name1": value1, "name2": value2}  → same object (values after write)
+std::string WebServer::handleWrite(const std::string& body, int& statusCode)
 {
     try {
         auto j = json::parse(body);
-        if (!j.contains("name") || !j.contains("value")) {
+        if (!j.is_object()) {
             statusCode = 400;
-            return json{{"error", "missing 'name' or 'value' field"}}.dump(2);
-        }
-
-        std::string name = j["name"];
-        m_registry->queueWrite(name, j["value"]);
-        m_registry->waitForUpdate(200);
-
-        DataRefEntry entry;
-        m_registry->readValue(name, entry);
-        statusCode = 200;
-        return entryToJson(name, entry).dump(2);
-
-    } catch (const json::exception& e) {
-        statusCode = 400;
-        return json{{"error", std::string("invalid JSON: ") + e.what()}}.dump(2);
-    }
-}
-
-// POST /api/dataref/setMultiple    body: [{"name":"sim/...", "value":123}, ...]
-std::string WebServer::handleSetMultiple(const std::string& body, int& statusCode)
-{
-    try {
-        auto j = json::parse(body);
-        json writes;
-        if (j.is_array()) writes = j;
-        else if (j.is_object() && j.contains("writes")) writes = j["writes"];
-        else {
-            statusCode = 400;
-            return json{{"error", "body must be array or {\"writes\":[...] "}}.dump(2);
+            return json{{"error", "body must be a JSON object with name: value pairs"}}.dump(2);
         }
 
         std::vector<std::string> names;
-        for (const auto& w : writes) {
-            if (!w.is_object() || !w.contains("name") || !w.contains("value")) continue;
-            std::string name = w["name"];
-            m_registry->queueWrite(name, w["value"]);
+        for (auto& el : j.items()) {
+            std::string name = el.key();
+            m_registry->queueWrite(name, el.value());
             names.push_back(name);
         }
 
-        m_registry->waitForUpdate(400); // Batch might take slightly longer to resolve all
+        if (names.empty()) {
+            statusCode = 400;
+            return json{{"error", "no valid name: value pairs"}}.dump(2);
+        }
 
-        json result = json::array();
+        m_registry->waitForUpdate(names.size() > 1 ? 400 : 200);
+
+        json result;
         for (const auto& name : names) {
             DataRefEntry entry;
             m_registry->readValue(name, entry);
-            result.push_back(entryToJson(name, entry));
+            if (!entry.found)
+                result[name] = nullptr;
+            else
+                result[name] = entryToValue(entry);
         }
-
         statusCode = 200;
         return result.dump(2);
 
@@ -471,10 +447,8 @@ std::string WebServer::handleStatusPage()
 <table>
 <tr><th>Method</th><th>Path</th><th>Body / query</th><th>Description</th></tr>
 <tr><td>GET</td><td>/api/dataref</td><td>?name=sim/...</td><td>Read single dataref</td></tr>
-<tr><td>POST</td><td>/api/dataref/get</td><td>{"name":"sim/..."}</td><td>Read single dataref</td></tr>
-<tr><td>POST</td><td>/api/dataref/getMultiple</td><td>["sim/...", ...]</td><td>Read multiple datarefs</td></tr>
-<tr><td>POST</td><td>/api/dataref/set</td><td>{"name":"...", "value":...}</td><td>Write single dataref</td></tr>
-<tr><td>POST</td><td>/api/dataref/setMultiple</td><td>[{"name":"...", "value":...}, ...]</td><td>Write multiple datarefs</td></tr>
+<tr><td>POST</td><td>/api/dataref/read</td><td>["sim/...", ...] or "sim/..."</td><td>Read one or more datarefs</td></tr>
+<tr><td>POST</td><td>/api/dataref/write</td><td>{"sim/...": value, ...}</td><td>Write one or more datarefs</td></tr>
 <tr><td>POST</td><td>/api/command/once</td><td>{"name":"sim/..."}</td><td>Trigger command once</td></tr>
 <tr><td>POST</td><td>/api/command/begin</td><td>{"name":"sim/..."}</td><td>Begin held command</td></tr>
 <tr><td>POST</td><td>/api/command/end</td><td>{"name":"sim/..."}</td><td>End held command</td></tr>
@@ -623,17 +597,11 @@ void WebServer::processRequest(int clientSocket, const std::string& msgStr)
         std::string name = queryParam(req.query, "name");
         body = handleGetOne(name, statusCode);
 
-    } else if (req.method == "POST" && req.path == "/api/dataref/get") {
-        body = handleGetOneBody(req.body, statusCode);
+    } else if (req.method == "POST" && req.path == "/api/dataref/read") {
+        body = handleRead(req.body, statusCode);
 
-    } else if (req.method == "POST" && req.path == "/api/dataref/getMultiple") {
-        body = handleGetMultiple(req.body, statusCode);
-
-    } else if (req.method == "POST" && req.path == "/api/dataref/set") {
-        body = handleSet(req.body, statusCode);
-
-    } else if (req.method == "POST" && req.path == "/api/dataref/setMultiple") {
-        body = handleSetMultiple(req.body, statusCode);
+    } else if (req.method == "POST" && req.path == "/api/dataref/write") {
+        body = handleWrite(req.body, statusCode);
 
     } else if (req.method == "POST" && req.path.find("/api/command/") == 0) {
         body = handleCommand(req.path, req.body, statusCode);

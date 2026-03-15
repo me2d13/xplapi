@@ -48,36 +48,20 @@
     <div id="result-get-dataref" class="result" style="display:none"></div>
   </div>
 
-  <h2>POST /api/dataref/get</h2>
+  <h2>POST /api/dataref/read</h2>
   <div class="section">
-    <label>Request body (JSON)</label>
-    <textarea id="post-dataref-get" placeholder='{"name": "sim/time/total_running_time_sec"}'></textarea>
-    <button onclick="callPost('/api/dataref/get', 'post-dataref-get', 'result-post-get')">Execute</button>
-    <div id="result-post-get" class="result" style="display:none"></div>
+    <label>Request body (JSON array of names, or single name string)</label>
+    <textarea id="post-dataref-read" placeholder='["sim/time/total_running_time_sec", "sim/cockpit2/gauges/indicators/airspeed_kts_pilot"]'></textarea>
+    <button onclick="callPost('/api/dataref/read', 'post-dataref-read', 'result-post-read')">Execute</button>
+    <div id="result-post-read" class="result" style="display:none"></div>
   </div>
 
-  <h2>POST /api/dataref/getMultiple</h2>
+  <h2>POST /api/dataref/write</h2>
   <div class="section">
-    <label>Request body (JSON array or {"names": [...]})</label>
-    <textarea id="post-dataref-getMultiple" placeholder='["sim/time/total_running_time_sec", "sim/cockpit2/gauges/indicators/airspeed_kts_pilot"]'></textarea>
-    <button onclick="callPost('/api/dataref/getMultiple', 'post-dataref-getMultiple', 'result-post-getMultiple')">Execute</button>
-    <div id="result-post-getMultiple" class="result" style="display:none"></div>
-  </div>
-
-  <h2>POST /api/dataref/set</h2>
-  <div class="section">
-    <label>Request body (JSON)</label>
-    <textarea id="post-dataref-set" placeholder='{"name": "sim/graphics/view/pilots_head_psi", "value": 45.0}'></textarea>
-    <button onclick="callPost('/api/dataref/set', 'post-dataref-set', 'result-post-set')">Execute</button>
-    <div id="result-post-set" class="result" style="display:none"></div>
-  </div>
-
-  <h2>POST /api/dataref/setMultiple</h2>
-  <div class="section">
-    <label>Request body (JSON array)</label>
-    <textarea id="post-dataref-setMultiple" placeholder='[{"name": "sim/graphics/view/pilots_head_psi", "value": -45.0}]'></textarea>
-    <button onclick="callPost('/api/dataref/setMultiple', 'post-dataref-setMultiple', 'result-post-setMultiple')">Execute</button>
-    <div id="result-post-setMultiple" class="result" style="display:none"></div>
+    <label>Request body (JSON object: name → value)</label>
+    <textarea id="post-dataref-write" placeholder='{"sim/graphics/view/pilots_head_psi": -45.0}'></textarea>
+    <button onclick="callPost('/api/dataref/write', 'post-dataref-write', 'result-post-write')">Execute</button>
+    <div id="result-post-write" class="result" style="display:none"></div>
   </div>
 
   <h2>POST /api/command/once</h2>
