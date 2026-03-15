@@ -35,7 +35,7 @@ So far it's built for Windows only (that's my setup), but feel free to create PR
 
 ## Installation
 
-1. Build the plugin (see [Building](#building)) or grab a release binary.
+1. Download release binary or build the plugin (see [Building](#building)) from source.
 2. Copy the output folder into X-Plane's plugin directory:
 
 ```
@@ -48,10 +48,7 @@ X-Plane 12/
           config.yaml    ← optional, see Configuration
 ```
 
-3. (Re)start X-Plane. Check the developer console for:
-   ```
-   xplapi: web server listening on port 8012
-   ```
+3. (Re)start X-Plane. Access status page at [http://localhost:8012](http://localhost:8012).
 
 ---
 
