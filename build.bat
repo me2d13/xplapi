@@ -3,11 +3,11 @@
 :: build.bat  –  xplapi X-Plane 12 plugin
 ::
 :: Usage:
-::   build           -> Debug|x64
-::   build release   -> Release|x64
-::   build clean     -> clean Debug|x64
-::   build log       -> write output to build.log
-::   build log release deploy  -> combine options
+::   build              -> Release|x64  (default, distributable)
+::   build debug        -> Debug|x64    (local dev only, NOT for distribution)
+::   build clean        -> clean Release|x64
+::   build log          -> write output to build.log
+::   build log deploy   -> combine options
 :: ============================================================
 
 set VSLANG=1033
@@ -15,7 +15,7 @@ set PreferredUILang=en-US
 
 set MSBUILD="C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
 set PROJECT=xplapi.vcxproj
-set CONFIG=Debug
+set CONFIG=Release
 set PLATFORM=x64
 set DEPLOY_DIR=E:\XPL12\X-Plane 12\Resources\plugins\xplapi\64
 set BUILD_LOG=build.log
@@ -24,6 +24,7 @@ set BUILD_LOG=build.log
 set DEPLOY=0
 set LOG=0
 for %%A in (%*) do (
+    if /I "%%A"=="debug"   set CONFIG=Debug
     if /I "%%A"=="release" set CONFIG=Release
     if /I "%%A"=="deploy"  set DEPLOY=1
     if /I "%%A"=="log"     set LOG=1
